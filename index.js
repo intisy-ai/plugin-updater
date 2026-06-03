@@ -209,11 +209,14 @@ const pluginUpdaterEntry = async function(input) {
   return {};
 };
 
-const apiMethods = { ...updaterAPI };
-delete apiMethods.name;
-Object.assign(pluginUpdaterEntry, apiMethods);
-
-// Guarantee the entry point can be activated as a standard plugin
-pluginUpdaterEntry.activate = async function() { return await pluginUpdaterEntry(); };
-
-module.exports = pluginUpdaterEntry;
+module.exports = {
+  activate: async function() { return await pluginUpdaterEntry(); },
+  earlyLaunch: updaterAPI.earlyLaunch,
+  updatePlugin: updaterAPI.updatePlugin,
+  deployToExecutionDir: updaterAPI.deployToExecutionDir,
+  rebuild: updaterAPI.rebuild,
+  downgrade: updaterAPI.downgrade,
+  disable: updaterAPI.disable,
+  uninstall: updaterAPI.uninstall,
+  default: pluginUpdaterEntry
+};
