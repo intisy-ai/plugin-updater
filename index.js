@@ -93,7 +93,8 @@ module.exports = {
   disable: function(plugin) {
     // Just delete the deployed folder, the hub will update plugins.json
     try {
-      const configDir = path.join(require('os').homedir(), ".config", "opencode");
+      const isCC = process.env.CC_LAUNCHER === "1";
+      const configDir = path.join(require('os').homedir(), ".config", isCC ? "claude" : "opencode");
       const pluginExecutionPath = path.join(configDir, "plugin", plugin.name);
       if (fs.existsSync(pluginExecutionPath)) {
         fs.rmSync(pluginExecutionPath, { recursive: true, force: true });
