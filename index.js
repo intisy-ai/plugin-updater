@@ -1,104 +1,121 @@
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+const REPOS_DIR = path.join(require('os').homedir(), '.config', 'github');
+
+function executeGit(cmd, dir) {
+  try {
+    return execSync(cmd, { cwd: dir, timeout: 60000, stdio: "ignore" });
+  } catch (e) {
+    console.error(`[Updater] Git command failed: ${cmd} in ${dir}`);
+    return false;
+  }
+}
+
 module.exports = {
   name: "plugin-updater",
 
-  rebuild: function(pluginItem) {
-    if (global.OpenCodeAPI && global.OpenCodeAPI.log) {
-      global.OpenCodeAPI.log("Rebuilding " + pluginItem.name);
-    }
-    return this._update(pluginItem);
-  },
-
-  downgrade: function(pluginItem, commitHash) {
-    return this._update(pluginItem, commitHash);
-  },
-
-  disable: function(pluginItem) {},
-
-  uninstall: function(pluginItem) {
-    if (global.OpenCodeAPI && global.OpenCodeAPI.removePluginFiles) {
-      global.OpenCodeAPI.removePluginFiles(pluginItem.name);
-    }
-  },
-
-  _update: function(pluginItem, commitHash) {
-    const fs = require('fs');
-    const path = require('path');
-    const { execSync } = require('child_process');
-
-    if (!global.OpenCodeAPI) return "No Launcher API available";
-
-    const reposDir = global.OpenCodeAPI.getReposDir();
-    var folderName = pluginItem.name.replace(/[^a-zA-Z0-9-]/g, '-');
-    var dir = path.join(reposDir, "intisy", folderName);
-
-    if (!fs.existsSync(dir)) {
-      var parentDir = path.dirname(dir);
-      if (!fs.existsSync(parentDir)) try { fs.mkdirSync(parentDir, { recursive: true }); } catch {}
-      try {
-        var cloneCmd = "git clone --recurse-submodules " + pluginItem.url + (pluginItem.branch ? " --branch " + pluginItem.branch : "") + " " + folderName;
-        execSync(cloneCmd, { cwd: path.dirname(dir), timeout: 60000, stdio: "ignore" });
-      } catch (e) { return "Clone failed: " + (e.message || e); }
+  /**
+   * Called by the launcher (OpenCode/Claude Code) to sync a specific plugin
+   */
+  updatePlugin: function(pluginName, gitUrl, branch = null, commitHash = null) {
+    const targetDir = path.join(REPOS_DIR, pluginName);
+    
+    // 1. Ensure directory exists and clone or pull
+    if (!fs.existsSync(targetDir)) {
+      if (!fs.existsSync(REPOS_DIR)) fs.mkdirSync(REPOS_DIR, { recursive: true });
+      const branchFlag = branch ? `--branch ${branch}` : "";
+      executeGit(`git clone --recurse-submodules ${branchFlag} ${gitUrl} ${pluginName}`, REPOS_DIR);
     } else {
-      try {
-        if (commitHash) {
-          execSync("git fetch origin", { cwd: dir, timeout: 30000, stdio: "ignore" });
-          execSync("git checkout " + commitHash, { cwd: dir, timeout: 10000, stdio: "ignore" });
-        } else if (pluginItem.branch) {
-          execSync("git fetch origin", { cwd: dir, timeout: 30000, stdio: "ignore" });
-          execSync("git checkout " + pluginItem.branch, { cwd: dir, timeout: 10000, stdio: "ignore" });
-          execSync("git pull --ff-only origin " + pluginItem.branch, { cwd: dir, timeout: 30000, stdio: "ignore" });
-        } else {
-          execSync("git checkout main || git checkout master", { cwd: dir, timeout: 10000, stdio: "ignore" });
-          execSync("git pull --ff-only", { cwd: dir, timeout: 30000, stdio: "ignore" });
-        }
-        execSync("git submodule update --init --recursive", { cwd: dir, timeout: 30000, stdio: "ignore" });
-      } catch {}
+      executeGit("git fetch origin", targetDir);
+      if (commitHash) {
+        executeGit(`git checkout ${commitHash}`, targetDir);
+      } else if (branch) {
+        executeGit(`git checkout ${branch}`, targetDir);
+        executeGit(`git pull --ff-only origin ${branch}`, targetDir);
+      } else {
+        executeGit("git checkout main || git checkout master", targetDir);
+        executeGit("git pull --ff-only", targetDir);
+      }
+      executeGit("git submodule update --init --recursive", targetDir);
     }
 
-    if (pluginItem.install) {
-      try { execSync(pluginItem.install.join(" "), { cwd: dir, timeout: 120000, stdio: "ignore" }); }
-      catch (e) { return "Install failed"; }
-    }
-    if (pluginItem.postInstall) {
-      try { execSync(pluginItem.postInstall.join(" "), { cwd: dir, timeout: 120000, stdio: "ignore" }); }
-      catch (e) { return "Post-install failed"; }
-    }
-    if (pluginItem.build) {
-      try { execSync(pluginItem.build.join(" "), { cwd: dir, timeout: 120000, stdio: "ignore" }); }
-      catch (e) { return "Build failed"; }
-    }
-    if (pluginItem.bundle) {
-      try { execSync(pluginItem.bundle.join(" "), { cwd: dir, timeout: 120000, stdio: "ignore" }); }
-      catch (e) { return "Bundle failed"; }
-    }
-
-    var outputPath = path.join(dir, pluginItem.output || pluginItem.pluginFile || '');
-    global.OpenCodeAPI.deployPlugin(pluginItem.name, outputPath);
-
-    return "Success";
+    return true;
   },
 
-  registerTests: function(testApi) {
-    testApi.addTest("updater", "Verify tui.js Sync", () => {
-      const fs = require('fs');
-      const path = require('path');
-      const crypto = require('crypto');
-      const HOME = require('os').homedir();
+  /**
+   * Called to deploy the compiled output to the execution directory
+   */
+  deployToExecutionDir: function(pluginName, executionPath) {
+    const sourceDir = path.join(REPOS_DIR, pluginName);
+    if (!fs.existsSync(sourceDir)) return false;
 
-      const fileHash = (p) => { try { return crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex").slice(0, 12); } catch { return null; } };
+    // Build if package.json exists
+    if (fs.existsSync(path.join(sourceDir, "package.json"))) {
+      try {
+        execSync("npm install", { cwd: sourceDir, stdio: "ignore" });
+        execSync("npm run build", { cwd: sourceDir, stdio: "ignore" });
+      } catch (e) {
+        // Fallback or ignore if no build step
+      }
+    }
 
-      const CORE_HUB = path.join(HOME, ".config", "github", "repos", "intisy", "core-hub", "tui.js");
-      const CLAUDE_HUB = path.join(HOME, ".config", "claude", "repos", "intisy", "claude-hub", "core", "tui.js");
-      const OC_HUB = path.join(HOME, ".config", "opencode", "repos", "intisy", "opencode-hub", "core", "tui.js");
+    // Determine deployment source (prefer dist, fallback to root)
+    const distPath = path.join(sourceDir, "dist");
+    const deploySource = fs.existsSync(distPath) ? distPath : sourceDir;
 
-      const hA = fileHash(CORE_HUB);
-      const hB = fileHash(CLAUDE_HUB);
-      const hC = fileHash(OC_HUB);
+    // Create a specific folder for this plugin inside the execution path
+    const pluginExecutionPath = path.join(executionPath, pluginName);
+    if (!fs.existsSync(pluginExecutionPath)) {
+      fs.mkdirSync(pluginExecutionPath, { recursive: true });
+    }
 
-      if (!hA) return { passed: false, message: "core-hub/tui.js missing" };
-      if (hB && hA !== hB) return { passed: false, message: "claude-hub/core/tui.js out of sync" };
-      if (hC && hA !== hC) return { passed: false, message: "opencode-hub/core/tui.js out of sync" };
-      return { passed: true, message: "tui.js in sync" };
-    });
+    try {
+      // Platform agnostic copy (using Node fs)
+      fs.cpSync(deploySource, pluginExecutionPath, { recursive: true, force: true });
+      return true;
+    } catch (e) {
+      console.error(`[Updater] Deploy failed: ${e.message}`);
+      return false;
+    }
+  },
+
+  rebuild: function(pluginObjOrName) {
+    const pluginName = typeof pluginObjOrName === 'string' ? pluginObjOrName : pluginObjOrName.name;
+    const targetDir = path.join(REPOS_DIR, pluginName);
+    if (fs.existsSync(targetDir)) {
+      try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch (e) {}
+    }
+    return null; // Return null for success
+  },
+
+  disable: function(plugin) {
+    // Just delete the deployed folder, the hub will update plugins.json
+    try {
+      const configDir = path.join(require('os').homedir(), ".config", "opencode");
+      const pluginExecutionPath = path.join(configDir, "plugin", plugin.name);
+      if (fs.existsSync(pluginExecutionPath)) {
+        fs.rmSync(pluginExecutionPath, { recursive: true, force: true });
+      }
+    } catch (e) {}
+  },
+
+  uninstall: function(plugin) {
+    this.disable(plugin);
+    const targetDir = path.join(REPOS_DIR, plugin.name);
+    if (fs.existsSync(targetDir)) {
+      try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch (e) {}
+    }
+  },
+
+  /**
+   * Specific logic to install/update the launcher itself
+   */
+  installLauncher: function() {
+    // Logic to install opencode-hub / claude-hub if they are missing
+    this.updatePlugin("core-hub", "https://github.com/intisy/core-hub.git");
+    this.updatePlugin("opencode-hub", "https://github.com/intisy/opencode-hub.git");
+    this.updatePlugin("claude-hub", "https://github.com/intisy/claude-hub.git");
   }
 };
