@@ -1,6 +1,6 @@
 {
   "name": "plugin-updater",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Plugin lifecycle manager for OpenCode and Claude Code launchers",
   "main": "index.js",
   "license": "MIT",
@@ -9,5 +9,11 @@
     "type": "git",
     "url": "git+https://github.com/intisy/plugin-updater.git"
   },
-  "keywords": ["opencode", "claude", "plugin", "updater", "lifecycle"]
+  "keywords": [
+    "opencode",
+    "claude",
+    "plugin",
+    "updater",
+    "lifecycle"
+  ]
 }
