@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "plugin-updater",
   "version": "1.0.2",
   "description": "Plugin lifecycle manager for OpenCode and Claude Code launchers",
