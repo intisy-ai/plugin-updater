@@ -19,6 +19,7 @@ function writeLog(message, isError = false) {
   try {
     const date = new Date();
     const dateStr = date.toISOString().split('T')[0];
+    const timeStr = date.toISOString().replace(/:/g, '-').split('.')[0];
     const isClaude = process.argv.join(' ').includes('claude');
     const appName = isClaude ? "claude" : "opencode";
     const configDir = getAppConfigDir(appName);
@@ -28,13 +29,12 @@ function writeLog(message, isError = false) {
       fs.mkdirSync(logsDir, { recursive: true });
     }
 
-    const logFile = path.join(logsDir, `updater-${dateStr}.log`);
+    const logFile = path.join(logsDir, `updater-${timeStr}.log`);
     const prefix = isError ? "[ERROR]" : "[INFO]";
     const logMsg = `[${date.toISOString()}] ${prefix} ${message}\n`;
 
     fs.appendFileSync(logFile, logMsg);
   } catch (e) {
-    // Silent fallback if logging fails
   }
   if (isError) console.error(message);
   else console.log(message);
@@ -86,6 +86,8 @@ function deployToExecutionDir(pluginName, executionPath) {
   if (!fs.existsSync(sourceDir)) return false;
 
   const packageJsonPath = path.join(sourceDir, "package.json");
+  let entryFile = "index.js";
+
   if (fs.existsSync(packageJsonPath)) {
     try {
       writeLog(`Running npm install for ${pluginName}`);
@@ -93,6 +95,10 @@ function deployToExecutionDir(pluginName, executionPath) {
       writeLog(`Finished npm install for ${pluginName}`);
 
       const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+      if (pkg.main) {
+        entryFile = pkg.main;
+      }
+
       if (pkg.scripts && pkg.scripts.build) {
         execSync("npm run build", { cwd: sourceDir, stdio: "ignore" });
         writeLog(`Finished npm run build for ${pluginName}`);
@@ -105,31 +111,34 @@ function deployToExecutionDir(pluginName, executionPath) {
   }
 
   const distPath = path.join(sourceDir, "dist");
-  const deploySource = fs.existsSync(distPath) ? distPath : sourceDir;
-  const pluginExecutionPath = path.join(executionPath, pluginName);
+  let deploySource = path.join(sourceDir, entryFile);
 
-  if (!fs.existsSync(pluginExecutionPath)) {
-    fs.mkdirSync(pluginExecutionPath, { recursive: true });
+  if (fs.existsSync(path.join(distPath, entryFile))) {
+    deploySource = path.join(distPath, entryFile);
+  } else if (fs.existsSync(path.join(distPath, "index.js"))) {
+    deploySource = path.join(distPath, "index.js");
+  }
+
+  const pluginExecutionFile = path.join(executionPath, `${pluginName}.js`);
+
+  if (!fs.existsSync(executionPath)) {
+    fs.mkdirSync(executionPath, { recursive: true });
   }
 
   try {
-    writeLog(`Running cpSync for ${pluginName}`);
-    fs.cpSync(deploySource, pluginExecutionPath, { recursive: true, force: true });
-    writeLog(`Finished cpSync for ${pluginName}`);
+    writeLog(`Running copy for ${pluginName}`);
+    fs.copyFileSync(deploySource, pluginExecutionFile);
+    writeLog(`Finished copy for ${pluginName}`);
   } catch (e) {
-    writeLog(`cpSync failed for ${pluginName}: ${e.message}`, true);
+    writeLog(`Copy failed for ${pluginName}: ${e.message}`, true);
   }
   return true;
 }
 
-// OpenCode NPM plugin contract: export default must be a function.
-// opencode iterates Object.entries(mod) and calls each export as fn(input).
-// ONLY export a single default function — no named exports.
 async function pluginUpdaterEntry(input) {
   const isClaude = process.argv.join(' ').includes('claude');
   const configDir = getAppConfigDir(isClaude ? "claude" : "opencode");
 
-  // 1. GUARANTEE BASE DIRECTORIES EXIST ON LAUNCH
   const reposDir = path.join(configDir, "repos");
   const pluginsDir = path.join(configDir, "plugin");
   if (!fs.existsSync(reposDir)) fs.mkdirSync(reposDir, { recursive: true });
@@ -159,12 +168,9 @@ async function pluginUpdaterEntry(input) {
     }
   }
 
-  // Return empty hooks object — required by opencode plugin contract
   return {};
 }
 
-// Attach API methods for hub access via: import('plugin-updater').then(m => m.default.earlyLaunch(...))
-// These are function properties, NOT module-level named exports — they won't appear in Object.entries(mod)
 pluginUpdaterEntry.earlyLaunch = function(configDir) {
   EARLY_LAUNCH_CONFIG_DIR = configDir;
   global.__PLUGIN_UPDATER_HANDLED_BY_HUB__ = true;
@@ -200,9 +206,9 @@ pluginUpdaterEntry.disable = function(plugin) {
       fs.writeFileSync(pluginsJsonPath, JSON.stringify(plugins, null, 2), "utf-8");
     }
   }
-  const pluginExecutionPath = path.join(configDir, "plugin", plugin.name);
+  const pluginExecutionPath = path.join(configDir, "plugin", `${plugin.name}.js`);
   if (fs.existsSync(pluginExecutionPath)) {
-    try { fs.rmSync(pluginExecutionPath, { recursive: true, force: true }); } catch (e) {}
+    try { fs.rmSync(pluginExecutionPath, { force: true }); } catch (e) {}
   }
 };
 pluginUpdaterEntry.uninstall = function(plugin) {
