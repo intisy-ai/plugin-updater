@@ -208,7 +208,12 @@ const pluginUpdaterEntry = async function(input) {
   return {};
 };
 
-// Attach API methods to the entry function
-Object.assign(pluginUpdaterEntry, updaterAPI);
+// Attach API methods to the entry function (skip 'name' — conflicts with Function.name)
+for (const [key, value] of Object.entries(updaterAPI)) {
+  if (key !== 'name') {
+    pluginUpdaterEntry[key] = value;
+  }
+}
+pluginUpdaterEntry.pluginName = updaterAPI.name;
 
 export default pluginUpdaterEntry;
