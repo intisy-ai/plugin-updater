@@ -57,125 +57,75 @@ function executeGit(command, cwd) {
   }
 }
 
-const updaterAPI = {
-  earlyLaunch: function(configDir) {
-    EARLY_LAUNCH_CONFIG_DIR = configDir;
-    global.__PLUGIN_UPDATER_HANDLED_BY_HUB__ = true;
-  },
+function updatePlugin(pluginName, gitUrl, branch, commitHash) {
+  const reposDir = getReposDir();
+  const targetDir = path.join(reposDir, pluginName);
 
-  updatePlugin: function(pluginName, gitUrl, branch = null, commitHash = null) {
-    const reposDir = getReposDir();
-    const targetDir = path.join(reposDir, pluginName);
-
-    if (!fs.existsSync(targetDir)) {
-      if (!fs.existsSync(reposDir)) fs.mkdirSync(reposDir, { recursive: true });
-      const branchFlag = branch ? `--branch ${branch}` : "";
-      executeGit(`git clone --recurse-submodules ${branchFlag} ${gitUrl} ${pluginName}`, reposDir);
-    } else {
-      executeGit("git fetch origin", targetDir);
-      if (commitHash) {
-        executeGit(`git checkout ${commitHash}`, targetDir);
-      } else if (branch) {
-        executeGit(`git checkout ${branch}`, targetDir);
-        executeGit(`git pull --ff-only origin ${branch}`, targetDir);
-      } else {
-        executeGit("git checkout main || git checkout master", targetDir);
-        executeGit("git pull --ff-only", targetDir);
-      }
-      executeGit("git submodule update --init --recursive", targetDir);
-    }
-    return true;
-  },
-
-  deployToExecutionDir: function(pluginName, executionPath) {
-    const sourceDir = path.join(getReposDir(), pluginName);
-    if (!fs.existsSync(sourceDir)) return false;
-
-    const packageJsonPath = path.join(sourceDir, "package.json");
-    if (fs.existsSync(packageJsonPath)) {
-      try {
-        writeLog(`Running npm install for ${pluginName}`);
-        execSync("npm install", { cwd: sourceDir, stdio: "ignore" });
-        writeLog(`Finished npm install for ${pluginName}`);
-
-        const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-        if (pkg.scripts && pkg.scripts.build) {
-          execSync("npm run build", { cwd: sourceDir, stdio: "ignore" });
-          writeLog(`Finished npm run build for ${pluginName}`);
-        } else {
-          writeLog(`Skipped npm run build for ${pluginName} (no build script found)`);
-        }
-      } catch (error) {
-        writeLog(`Build/Install failed for ${pluginName}: ${error.message}`, true);
-      }
-    }
-
-    const distPath = path.join(sourceDir, "dist");
-    const deploySource = fs.existsSync(distPath) ? distPath : sourceDir;
-    const pluginExecutionPath = path.join(executionPath, pluginName);
-
-    if (!fs.existsSync(pluginExecutionPath)) {
-      fs.mkdirSync(pluginExecutionPath, { recursive: true });
-    }
-
-    try {
-      writeLog(`Running cpSync for ${pluginName}`);
-      fs.cpSync(deploySource, pluginExecutionPath, { recursive: true, force: true });
-      writeLog(`Finished cpSync for ${pluginName}`);
-    } catch (e) {
-      writeLog(`cpSync failed for ${pluginName}: ${e.message}`, true);
-    }
-    return true;
-  },
-
-  rebuild: function(pluginName) {
-    const isClaude = process.argv.join(' ').includes('claude');
-    const configDir = getAppConfigDir(isClaude ? "claude" : "opencode");
-    this.deployToExecutionDir(pluginName, path.join(configDir, "plugin"));
-    return "Rebuilt " + pluginName;
-  },
-
-  downgrade: function(pluginName, commitHash) {
-    const reposDir = getReposDir();
-    const targetDir = path.join(reposDir, pluginName);
-    if (fs.existsSync(targetDir)) {
-      executeGit(`git fetch origin`, targetDir);
+  if (!fs.existsSync(targetDir)) {
+    if (!fs.existsSync(reposDir)) fs.mkdirSync(reposDir, { recursive: true });
+    const branchFlag = branch ? `--branch ${branch}` : "";
+    executeGit(`git clone --recurse-submodules ${branchFlag} ${gitUrl} ${pluginName}`, reposDir);
+  } else {
+    executeGit("git fetch origin", targetDir);
+    if (commitHash) {
       executeGit(`git checkout ${commitHash}`, targetDir);
-      executeGit(`git submodule update --init --recursive`, targetDir);
-      return this.rebuild(pluginName);
+    } else if (branch) {
+      executeGit(`git checkout ${branch}`, targetDir);
+      executeGit(`git pull --ff-only origin ${branch}`, targetDir);
+    } else {
+      executeGit("git checkout main || git checkout master", targetDir);
+      executeGit("git pull --ff-only", targetDir);
     }
-    return "Repo not found";
-  },
+    executeGit("git submodule update --init --recursive", targetDir);
+  }
+  return true;
+}
 
-  disable: function(plugin) {
-    const isClaude = process.argv.join(' ').includes('claude');
-    const configDir = getAppConfigDir(isClaude ? "claude" : "opencode");
-    const pluginsJsonPath = path.join(configDir, "config", "plugins.json");
-    if (fs.existsSync(pluginsJsonPath)) {
-      let plugins = JSON.parse(fs.readFileSync(pluginsJsonPath, "utf-8"));
-      const pluginIndex = plugins.findIndex(p => p.name === plugin.name);
-      if (pluginIndex >= 0) {
-        plugins[pluginIndex].enabled = false;
-        fs.writeFileSync(pluginsJsonPath, JSON.stringify(plugins, null, 2), "utf-8");
+function deployToExecutionDir(pluginName, executionPath) {
+  const sourceDir = path.join(getReposDir(), pluginName);
+  if (!fs.existsSync(sourceDir)) return false;
+
+  const packageJsonPath = path.join(sourceDir, "package.json");
+  if (fs.existsSync(packageJsonPath)) {
+    try {
+      writeLog(`Running npm install for ${pluginName}`);
+      execSync("npm install", { cwd: sourceDir, stdio: "ignore" });
+      writeLog(`Finished npm install for ${pluginName}`);
+
+      const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+      if (pkg.scripts && pkg.scripts.build) {
+        execSync("npm run build", { cwd: sourceDir, stdio: "ignore" });
+        writeLog(`Finished npm run build for ${pluginName}`);
+      } else {
+        writeLog(`Skipped npm run build for ${pluginName} (no build script found)`);
       }
-    }
-    const pluginExecutionPath = path.join(configDir, "plugin", plugin.name);
-    if (fs.existsSync(pluginExecutionPath)) {
-      try { fs.rmSync(pluginExecutionPath, { recursive: true, force: true }); } catch (e) {}
-    }
-  },
-
-  uninstall: function(plugin) {
-    this.disable(plugin);
-    const targetDir = path.join(getReposDir(), plugin.name);
-    if (fs.existsSync(targetDir)) {
-      try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch (e) {}
+    } catch (error) {
+      writeLog(`Build/Install failed for ${pluginName}: ${error.message}`, true);
     }
   }
-};
 
-// OpenCode plugin server function — called by opencode with plugin input context
-const serverPlugin = async function(input) {
+  const distPath = path.join(sourceDir, "dist");
+  const deploySource = fs.existsSync(distPath) ? distPath : sourceDir;
+  const pluginExecutionPath = path.join(executionPath, pluginName);
+
+  if (!fs.existsSync(pluginExecutionPath)) {
+    fs.mkdirSync(pluginExecutionPath, { recursive: true });
+  }
+
+  try {
+    writeLog(`Running cpSync for ${pluginName}`);
+    fs.cpSync(deploySource, pluginExecutionPath, { recursive: true, force: true });
+    writeLog(`Finished cpSync for ${pluginName}`);
+  } catch (e) {
+    writeLog(`cpSync failed for ${pluginName}: ${e.message}`, true);
+  }
+  return true;
+}
+
+// OpenCode NPM plugin contract: export default must be a function.
+// opencode iterates Object.entries(mod) and calls each export as fn(input).
+// ONLY export a single default function — no named exports.
+async function pluginUpdaterEntry(input) {
   const configDir = (input && input.directory)
     ? path.dirname(input.directory)
     : path.dirname(getReposDir());
@@ -189,7 +139,8 @@ const serverPlugin = async function(input) {
   writeLog(`plugin-updater activated. configDir=${configDir}`);
 
   if (!global.__PLUGIN_UPDATER_HANDLED_BY_HUB__) {
-    updaterAPI.earlyLaunch(configDir);
+    EARLY_LAUNCH_CONFIG_DIR = configDir;
+    global.__PLUGIN_UPDATER_HANDLED_BY_HUB__ = true;
 
     const pluginsJsonPath = path.join(configDir, "config", "plugins.json");
     if (fs.existsSync(pluginsJsonPath)) {
@@ -199,8 +150,8 @@ const serverPlugin = async function(input) {
           if (plugin.url && plugin.enabled !== false && plugin.type !== "npm") {
             const branch = plugin.branch || null;
             const commit = plugin.commit || null;
-            updaterAPI.updatePlugin(plugin.name, plugin.url, branch, commit);
-            updaterAPI.deployToExecutionDir(plugin.name, pluginsDir);
+            updatePlugin(plugin.name, plugin.url, branch, commit);
+            deployToExecutionDir(plugin.name, pluginsDir);
           }
         }
       } catch (e) {
@@ -209,18 +160,58 @@ const serverPlugin = async function(input) {
     }
   }
 
-  // Return hooks object (can be empty — opencode expects this shape)
+  // Return empty hooks object — required by opencode plugin contract
   return {};
+}
+
+// Attach API methods for hub access via: import('plugin-updater').then(m => m.default.earlyLaunch(...))
+// These are function properties, NOT module-level named exports — they won't appear in Object.entries(mod)
+pluginUpdaterEntry.earlyLaunch = function(configDir) {
+  EARLY_LAUNCH_CONFIG_DIR = configDir;
+  global.__PLUGIN_UPDATER_HANDLED_BY_HUB__ = true;
+};
+pluginUpdaterEntry.updatePlugin = updatePlugin;
+pluginUpdaterEntry.deployToExecutionDir = deployToExecutionDir;
+pluginUpdaterEntry.rebuild = function(pluginName) {
+  const isClaude = process.argv.join(' ').includes('claude');
+  const configDir = getAppConfigDir(isClaude ? "claude" : "opencode");
+  deployToExecutionDir(pluginName, path.join(configDir, "plugin"));
+  return "Rebuilt " + pluginName;
+};
+pluginUpdaterEntry.downgrade = function(pluginName, commitHash) {
+  const reposDir = getReposDir();
+  const targetDir = path.join(reposDir, pluginName);
+  if (fs.existsSync(targetDir)) {
+    executeGit(`git fetch origin`, targetDir);
+    executeGit(`git checkout ${commitHash}`, targetDir);
+    executeGit(`git submodule update --init --recursive`, targetDir);
+    return pluginUpdaterEntry.rebuild(pluginName);
+  }
+  return "Repo not found";
+};
+pluginUpdaterEntry.disable = function(plugin) {
+  const isClaude = process.argv.join(' ').includes('claude');
+  const configDir = getAppConfigDir(isClaude ? "claude" : "opencode");
+  const pluginsJsonPath = path.join(configDir, "config", "plugins.json");
+  if (fs.existsSync(pluginsJsonPath)) {
+    let plugins = JSON.parse(fs.readFileSync(pluginsJsonPath, "utf-8"));
+    const pluginIndex = plugins.findIndex(p => p.name === plugin.name);
+    if (pluginIndex >= 0) {
+      plugins[pluginIndex].enabled = false;
+      fs.writeFileSync(pluginsJsonPath, JSON.stringify(plugins, null, 2), "utf-8");
+    }
+  }
+  const pluginExecutionPath = path.join(configDir, "plugin", plugin.name);
+  if (fs.existsSync(pluginExecutionPath)) {
+    try { fs.rmSync(pluginExecutionPath, { recursive: true, force: true }); } catch (e) {}
+  }
+};
+pluginUpdaterEntry.uninstall = function(plugin) {
+  pluginUpdaterEntry.disable(plugin);
+  const targetDir = path.join(getReposDir(), plugin.name);
+  if (fs.existsSync(targetDir)) {
+    try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch (e) {}
+  }
 };
 
-// Expose updaterAPI on serverPlugin for hub access: import('plugin-updater').then(m => m.default.server.earlyLaunch(...))
-Object.keys(updaterAPI).forEach(key => {
-  serverPlugin[key] = updaterAPI[key];
-});
-
-// OpenCode V1 plugin contract: export default { id, server }
-// opencode calls mod.default.server(input) to initialize the plugin
-export default {
-  id: "plugin-updater",
-  server: serverPlugin
-};
+export default pluginUpdaterEntry;
