@@ -126,9 +126,8 @@ function deployToExecutionDir(pluginName, executionPath) {
 // opencode iterates Object.entries(mod) and calls each export as fn(input).
 // ONLY export a single default function — no named exports.
 async function pluginUpdaterEntry(input) {
-  const configDir = (input && input.directory)
-    ? path.dirname(input.directory)
-    : path.dirname(getReposDir());
+  const isClaude = process.argv.join(' ').includes('claude');
+  const configDir = getAppConfigDir(isClaude ? "claude" : "opencode");
 
   // 1. GUARANTEE BASE DIRECTORIES EXIST ON LAUNCH
   const reposDir = path.join(configDir, "repos");
