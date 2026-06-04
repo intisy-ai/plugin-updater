@@ -1,7 +1,7 @@
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const { execSync } = require('child_process');
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { execSync } from 'child_process';
 
 let EARLY_LAUNCH_CONFIG_DIR = null;
 
@@ -22,16 +22,16 @@ function writeLog(message, isError = false) {
     const isClaude = process.argv.join(' ').includes('claude');
     const appName = isClaude ? "claude" : "opencode";
     const configDir = getAppConfigDir(appName);
-    
+
     const logsDir = path.join(configDir, "logs", dateStr);
     if (!fs.existsSync(logsDir)) {
       fs.mkdirSync(logsDir, { recursive: true });
     }
-    
+
     const logFile = path.join(logsDir, `updater-${dateStr}.log`);
     const prefix = isError ? "[ERROR]" : "[INFO]";
     const logMsg = `[${date.toISOString()}] ${prefix} ${message}\n`;
-    
+
     fs.appendFileSync(logFile, logMsg);
   } catch (e) {
     // Silent fallback if logging fails
@@ -68,7 +68,7 @@ const updaterAPI = {
   updatePlugin: function(pluginName, gitUrl, branch = null, commitHash = null) {
     const reposDir = getReposDir();
     const targetDir = path.join(reposDir, pluginName);
-    
+
     if (!fs.existsSync(targetDir)) {
       if (!fs.existsSync(reposDir)) fs.mkdirSync(reposDir, { recursive: true });
       const branchFlag = branch ? `--branch ${branch}` : "";
@@ -99,14 +99,13 @@ const updaterAPI = {
         writeLog(`Running npm install for ${pluginName}`);
         execSync("npm install", { cwd: sourceDir, stdio: "ignore" });
         writeLog(`Finished npm install for ${pluginName}`);
-        
-        // Safely check if a build script exists before executing
+
         const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
         if (pkg.scripts && pkg.scripts.build) {
-            execSync("npm run build", { cwd: sourceDir, stdio: "ignore" });
-            writeLog(`Finished npm run build for ${pluginName}`);
+          execSync("npm run build", { cwd: sourceDir, stdio: "ignore" });
+          writeLog(`Finished npm run build for ${pluginName}`);
         } else {
-            writeLog(`Skipped npm run build for ${pluginName} (no build script found)`);
+          writeLog(`Skipped npm run build for ${pluginName} (no build script found)`);
         }
       } catch (error) {
         writeLog(`Build/Install failed for ${pluginName}: ${error.message}`, true);
@@ -179,7 +178,7 @@ const updaterAPI = {
 
 const pluginUpdaterEntry = async function(input) {
   const configDir = (input && input.configDir) ? input.configDir : path.dirname(getReposDir());
-  
+
   // 1. GUARANTEE BASE DIRECTORIES EXIST ON LAUNCH
   const reposDir = path.join(configDir, "repos");
   const pluginsDir = path.join(configDir, "plugin");
@@ -209,8 +208,7 @@ const pluginUpdaterEntry = async function(input) {
   return {};
 };
 
-const apiMethods = { ...updaterAPI };
-delete apiMethods.name;
-Object.assign(pluginUpdaterEntry, apiMethods);
+// Attach API methods to the entry function
+Object.assign(pluginUpdaterEntry, updaterAPI);
 
-module.exports = pluginUpdaterEntry;
+export default pluginUpdaterEntry;
