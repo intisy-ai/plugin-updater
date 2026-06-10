@@ -113,6 +113,17 @@ function getNpmGlobalRoot(): string {
 
 function resolveNpmPluginVersion(name: string, configDir: string): string {
   try {
+    // opencode installs npm plugins into ~/.cache/opencode/packages/<name>@<spec>/
+    const packageCache = path.join(os.homedir(), ".cache", "opencode", "packages");
+    if (fs.existsSync(packageCache)) {
+      for (const entry of fs.readdirSync(packageCache)) {
+        if (entry !== name && !entry.startsWith(`${name}@`)) continue;
+        const cachedPkg = path.join(packageCache, entry, "node_modules", name, "package.json");
+        if (fs.existsSync(cachedPkg)) {
+          return JSON.parse(fs.readFileSync(cachedPkg, "utf8")).version || "";
+        }
+      }
+    }
     const cacheDir = path.join(configDir, "cache", "node_modules");
     const globalNpm = getNpmGlobalRoot();
     const candidates = [
