@@ -1,6 +1,6 @@
 {
   "name": "plugin-updater",
-  "version": "1.0.29",
+  "version": "1.0.30",
   "description": "Plugin lifecycle manager for OpenCode and Claude Code launchers",
   "type": "module",
   "main": "dist/index.js",

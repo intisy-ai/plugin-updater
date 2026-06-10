@@ -474,9 +474,10 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   }
 
   for (const plugin of plugins) {
-    if (!plugin.enabled) continue;
-    if (plugin.autoUpdate === false) continue;
-    if (!plugin.url) continue;
+    // absence of the enabled key means enabled, matching the loader TUI
+    if (plugin.enabled === false) { writeLog(`Skipping disabled plugin ${plugin.name}`); continue; }
+    if (plugin.autoUpdate === false) { writeLog(`Skipping auto-update for ${plugin.name} (autoUpdate off)`); continue; }
+    if (!plugin.url) { writeLog(`Skipping ${plugin.name}: no url in plugins.json`, true); continue; }
 
     writeLog(`Processing earlyLaunch for ${plugin.name}`);
     try {
