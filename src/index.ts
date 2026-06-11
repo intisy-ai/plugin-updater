@@ -624,6 +624,28 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   }
 }
 
+export function getPluginsPath(configDir: string): string {
+  if (isOpencodeHookInvocation(configDir)) return "";
+  const preferred = path.join(configDir, "config", "plugins.json");
+  const fallback = path.join(configDir, "plugins.json");
+  if (fs.existsSync(preferred)) return preferred;
+  if (fs.existsSync(fallback)) return fallback;
+  return preferred;
+}
+
+// single source of truth for the git-plugin list; consumers (loaders, TUI)
+// must read through this rather than touching plugins.json directly
+export function getPlugins(configDir: string): Plugin[] {
+  if (isOpencodeHookInvocation(configDir)) return [];
+  const file = getPluginsPath(configDir);
+  try {
+    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf-8"));
+  } catch (e: unknown) {
+    writeLog(`Failed to parse ${file}: ${(e as { message: string }).message}`, true);
+  }
+  return [];
+}
+
 export async function activate(opencodeHookInput?: unknown): Promise<void | object> {
   // module load below calls activate() with no argument; opencode passes a
   // context object when re-invoking the export — return an inert plugin instance
@@ -632,17 +654,8 @@ export async function activate(opencodeHookInput?: unknown): Promise<void | obje
   const configDir = getAppConfigDir(appName);
   writeLog(`Plugin updater activating for ${appName}`);
 
-  const pluginsJsonPath = path.join(configDir, "config", "plugins.json");
-  let gitPlugins: Plugin[] = [];
-  if (fs.existsSync(pluginsJsonPath)) {
-    try {
-      gitPlugins = JSON.parse(fs.readFileSync(pluginsJsonPath, "utf-8"));
-      writeLog(`Found ${gitPlugins.length} git plugins in plugins.json`);
-    } catch (e: unknown) {
-      writeLog(`Failed to parse plugins.json: ${(e as { message: string }).message}`, true);
-    }
-  }
-
+  const gitPlugins = getPlugins(configDir);
+  writeLog(`Found ${gitPlugins.length} git plugins in plugins.json`);
   await earlyLaunch(configDir, gitPlugins);
 }
 
