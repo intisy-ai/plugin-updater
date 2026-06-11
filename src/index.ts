@@ -268,7 +268,8 @@ function updatePlugin(
   if (!fs.existsSync(targetDir)) {
     if (!fs.existsSync(reposDir)) fs.mkdirSync(reposDir, { recursive: true });
     const branchFlag = branch ? `--branch ${branch}` : "";
-    executeGit(`git clone --recurse-submodules ${branchFlag} ${gitUrl} ${pluginName}`, reposDir);
+    const cloned = executeGit(`git clone --recurse-submodules ${branchFlag} ${gitUrl} ${pluginName}`, reposDir);
+    if (!cloned) return { success: false, changed: false };
     fs.writeFileSync(lastCheckFile, Date.now().toString());
     didChange = true;
   } else {
@@ -506,6 +507,7 @@ export async function updatePluginPublic(
   const configDir = getAppConfigDir(getAppName());
   // interval 0: an explicit update request must never fast-path-skip
   const result = updatePlugin(pluginName, gitUrl, branch, commitHash ?? null, 0);
+  if (!result.success) throw new Error(`could not set up ${pluginName} - see the updater log`);
   await deployToExecutionDir(pluginName, path.join(configDir, "plugin"), result.changed, configDir);
 }
 
@@ -545,6 +547,10 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
     writeLog(`Processing earlyLaunch for ${plugin.name}`);
     try {
       const updateResult = updatePlugin(plugin.name, plugin.url, plugin.branch, null, plugin.updateInterval ?? 1);
+      if (!updateResult.success) {
+        writeLog(`Skipping deploy for ${plugin.name}: update failed`, true);
+        continue;
+      }
       await deployToExecutionDir(plugin.name, path.join(configDir, "plugin"), updateResult.changed, configDir);
     } catch (e: unknown) {
       const err = e as { message: string };
