@@ -1,9 +1,12 @@
 {
   "name": "plugin-updater",
-  "version": "1.0.31",
+  "version": "1.0.32",
   "description": "Plugin lifecycle manager for OpenCode and Claude Code launchers",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "plugin-updater": "dist/cli.js"
+  },
   "license": "MIT",
   "author": "intisy",
   "repository": {

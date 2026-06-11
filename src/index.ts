@@ -32,12 +32,17 @@ let EARLY_LAUNCH_CONFIG_DIR: string | null = null;
 let PLUGIN_CONFIG: Record<string, unknown> | null = null;
 const START_TIME = new Date().toISOString().replace(/:/g, "-").split(".")[0];
 
+// the CLI runs without "claude" in argv, so it forces the app via env
+function getAppName(): string {
+  const override = process.env.PLUGIN_UPDATER_APP;
+  if (override === "claude" || override === "opencode") return override;
+  return process.argv.join(" ").includes("claude") ? "claude" : "opencode";
+}
+
 function getPluginConfig(): Record<string, unknown> {
   if (PLUGIN_CONFIG !== null) return PLUGIN_CONFIG;
   try {
-    const isClaude = process.argv.join(" ").includes("claude");
-    const appName = isClaude ? "claude" : "opencode";
-    const configDir = getAppConfigDir(appName);
+    const configDir = getAppConfigDir(getAppName());
     const preferred = path.join(configDir, "config", "plugin-updater.json");
     const fallback = path.join(configDir, "plugin-updater.json");
     const p = fs.existsSync(preferred) ? preferred : fs.existsSync(fallback) ? fallback : null;
@@ -62,9 +67,7 @@ function writeLog(message: string, isError = false): void {
     if (loggingEnabled) {
       const date = new Date();
       const dateStr = date.toISOString().split("T")[0];
-      const isClaude = process.argv.join(" ").includes("claude");
-      const appName = isClaude ? "claude" : "opencode";
-      const configDir = getAppConfigDir(appName);
+      const configDir = getAppConfigDir(getAppName());
       const logsDir = path.join(configDir, "logs", dateStr);
       if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
       const logFile = path.join(logsDir, `plugin-updater-${START_TIME}.log`);
@@ -72,7 +75,7 @@ function writeLog(message: string, isError = false): void {
       fs.appendFileSync(logFile, `[${date.toISOString()}] ${prefix} ${message}\n`);
     }
   } catch { /* never crash on log failure */ }
-  if (process.env.PLUGIN_UPDATER_LIBRARY_MODE === "1") return;
+  if (process.env.PLUGIN_UPDATER_LIBRARY_MODE === "1" && process.env.PLUGIN_UPDATER_CLI !== "1") return;
   if (isError) console.error(message);
   else if (loggingEnabled) console.log(message);
 }
@@ -80,9 +83,7 @@ function writeLog(message: string, isError = false): void {
 let NPM_GLOBAL_ROOT: string | null = null;
 
 function getReposDir(): string {
-  const isClaude = process.argv.join(" ").includes("claude");
-  const appName = isClaude ? "claude" : "opencode";
-  return path.join(getAppConfigDir(appName), "repos");
+  return path.join(getAppConfigDir(getAppName()), "repos");
 }
 
 function executeGit(command: string, cwd: string): boolean {
@@ -425,12 +426,26 @@ async function deployToExecutionDir(pluginName: string, executionPath: string, c
     const err = e as { message: string };
     writeLog(`Copy failed for ${pluginName}: ${err.message}`, true);
   }
+
+  // Claude Code never imports deployed plugin files, so under claude the
+  // updater is the runtime and invokes the plugin's activate() itself
+  if (getAppName() === "claude") {
+    try {
+      const deployed = await import(pluginExecutionFile);
+      if (typeof deployed.activate === "function") {
+        writeLog(`Activating ${pluginName}`);
+        await deployed.activate();
+        writeLog(`Activated ${pluginName}`);
+      }
+    } catch (e: unknown) {
+      writeLog(`Activation failed for ${pluginName}: ${(e as { message: string }).message}`, true);
+    }
+  }
   return true;
 }
 
 async function pluginUpdaterEntry(input: PluginUpdaterInput | null): Promise<void> {
-  const isClaude = process.argv.join(" ").includes("claude");
-  const appName = isClaude ? "claude" : "opencode";
+  const appName = getAppName();
   const configDir = getAppConfigDir(appName);
   const pluginsDir = path.join(configDir, "plugin");
 
@@ -452,8 +467,7 @@ export async function updatePluginPublic(
 ): Promise<void | object> {
   if (isOpencodeHookInvocation(pluginName)) return {};
   writeLog(`Public API update call for ${pluginName}`);
-  const appName = process.argv.join(" ").includes("claude") ? "claude" : "opencode";
-  const configDir = getAppConfigDir(appName);
+  const configDir = getAppConfigDir(getAppName());
   // interval 0: an explicit update request must never fast-path-skip
   const result = updatePlugin(pluginName, gitUrl, branch, commitHash ?? null, 0);
   await deployToExecutionDir(pluginName, path.join(configDir, "plugin"), result.changed, configDir);
@@ -507,8 +521,7 @@ export async function activate(opencodeHookInput?: unknown): Promise<void | obje
   // module load below calls activate() with no argument; opencode passes a
   // context object when re-invoking the export — return an inert plugin instance
   if (opencodeHookInput !== undefined) return {};
-  const isClaude = process.argv.join(" ").includes("claude");
-  const appName = isClaude ? "claude" : "opencode";
+  const appName = getAppName();
   const configDir = getAppConfigDir(appName);
   writeLog(`Plugin updater activating for ${appName}`);
 
