@@ -5,7 +5,7 @@ import { execSync } from "child_process";
 import { getReposDir } from "./env.js";
 import { writeLog } from "./log.js";
 
-const BUILD_OUTPUT_DIRS = ["dist", path.join("core", "dist")];
+const BUILD_OUTPUT_DIRS = ["dist", path.join("core", "dist"), path.join("core-auth", "dist")];
 
 export function executeGit(command: string, cwd: string): boolean {
   writeLog(`Executing git: ${command} in ${cwd}`);
