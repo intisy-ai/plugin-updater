@@ -51,23 +51,41 @@ export function updatePlugin(
     const elapsed = Date.now() - lastCheck;
 
     if (elapsed < intervalMs) {
-      writeLog(`Fast-path: ${pluginName} skipping update check (checked ${Math.floor(elapsed / 60_000)} min ago, interval ${updateInterval}h)`);
-      // even when skipping the network check, keep embedded submodules pinned to
-      // this checkout — a loader running against a stale core/core-auth is the
-      // top cause of "looks broken but it's just stale". Rebuild if they moved.
-      if (fs.existsSync(path.join(targetDir, ".gitmodules"))) {
-        let before = "";
-        try { before = execSync("git submodule status --recursive", { cwd: targetDir }).toString(); } catch { /* ignore */ }
-        executeGit("git submodule sync --recursive", targetDir);
-        executeGit("git submodule update --init --recursive", targetDir);
-        let after = "";
-        try { after = execSync("git submodule status --recursive", { cwd: targetDir }).toString(); } catch { /* ignore */ }
-        if (before !== after) {
-          writeLog(`Fast-path: ${pluginName} submodules were out of sync — resynced, forcing rebuild`);
-          return { success: true, changed: true };
-        }
+      // The interval throttles the expensive fetch/build, NOT change detection.
+      // A pinned commit is intentional; otherwise do a cheap ls-remote so a new
+      // push is picked up on the very next launch instead of waiting out the hour.
+      let remoteMoved = false;
+      if (!commitHash) {
+        try {
+          const ref = branch || "HEAD";
+          const remoteHash = execSync(`git ls-remote origin ${ref}`, { cwd: targetDir }).toString().trim().split(/\s+/)[0] || "";
+          const localHash = execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim();
+          remoteMoved = !!remoteHash && !!localHash && remoteHash !== localHash;
+        } catch { /* offline / transient — fall back to skipping until the interval */ }
       }
-      return { success: true, changed: false };
+
+      if (!remoteMoved) {
+        writeLog(`Fast-path: ${pluginName} skipping update check (checked ${Math.floor(elapsed / 60_000)} min ago, interval ${updateInterval}h)`);
+        // even when skipping the network check, keep embedded submodules pinned to
+        // this checkout — a loader running against a stale core/core-auth is the
+        // top cause of "looks broken but it's just stale". Rebuild if they moved.
+        if (fs.existsSync(path.join(targetDir, ".gitmodules"))) {
+          let before = "";
+          try { before = execSync("git submodule status --recursive", { cwd: targetDir }).toString(); } catch { /* ignore */ }
+          executeGit("git submodule sync --recursive", targetDir);
+          executeGit("git submodule update --init --recursive", targetDir);
+          let after = "";
+          try { after = execSync("git submodule status --recursive", { cwd: targetDir }).toString(); } catch { /* ignore */ }
+          if (before !== after) {
+            writeLog(`Fast-path: ${pluginName} submodules were out of sync — resynced, forcing rebuild`);
+            return { success: true, changed: true };
+          }
+        }
+        return { success: true, changed: false };
+      }
+
+      writeLog(`Fast-path: ${pluginName} remote moved — updating despite interval`);
+      // fall through to the full fetch/checkout/build path below
     }
 
     fs.writeFileSync(lastCheckFile, Date.now().toString());
