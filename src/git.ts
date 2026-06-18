@@ -70,13 +70,17 @@ export function updatePlugin(
         // this checkout — a loader running against a stale core/core-auth is the
         // top cause of "looks broken but it's just stale". Rebuild if they moved.
         if (fs.existsSync(path.join(targetDir, ".gitmodules"))) {
-          let before = "";
-          try { before = execSync("git submodule status --recursive", { cwd: targetDir }).toString(); } catch { /* ignore */ }
-          executeGit("git submodule sync --recursive", targetDir);
-          executeGit("git submodule update --init --recursive", targetDir);
-          let after = "";
-          try { after = execSync("git submodule status --recursive", { cwd: targetDir }).toString(); } catch { /* ignore */ }
-          if (before !== after) {
+          // Cheap LOCAL drift check first: `git submodule status` prefixes a line
+          // with '+' when the submodule is off its pinned commit and '-' when it is
+          // uninitialized. Only pay for the expensive recursive sync/update when one
+          // of those is true — otherwise this ran a full submodule update on every
+          // plugin every launch, which was the bulk of the startup delay.
+          let status = "";
+          try { status = execSync("git submodule status --recursive", { cwd: targetDir }).toString(); } catch { /* ignore */ }
+          const drifted = status.split("\n").some((line) => line.startsWith("+") || line.startsWith("-"));
+          if (drifted) {
+            executeGit("git submodule sync --recursive", targetDir);
+            executeGit("git submodule update --init --recursive", targetDir);
             writeLog(`Fast-path: ${pluginName} submodules were out of sync — resynced, forcing rebuild`);
             return { success: true, changed: true };
           }
