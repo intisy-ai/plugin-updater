@@ -11,6 +11,7 @@ interface ParsedArgs {
   urls: string[];
   app?: string;
   branch?: string;
+  sync?: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -18,6 +19,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   for (let i = 1; i < argv.length; i++) {
     if (argv[i] === "--app") parsed.app = argv[++i];
     else if (argv[i] === "--branch") parsed.branch = argv[++i];
+    else if (argv[i] === "--sync") parsed.sync = true;
     else parsed.urls.push(argv[i]);
   }
   return parsed;
@@ -99,7 +101,7 @@ function registerOpencodePlugin(configDir: string): void {
   console.log(`Registered plugin-updater in ${ocPath}`);
 }
 
-function addPluginEntry(configDir: string, url: string, branch?: string): { name: string; url: string; branch?: string } {
+function addPluginEntry(configDir: string, url: string, branch?: string, sync?: boolean): { name: string; url: string; branch?: string } {
   const cleanUrl = url.replace(/\.git$/, "");
   const name = cleanUrl.split("/").pop() ?? cleanUrl;
   ensurePluginsJson(configDir);
@@ -108,6 +110,7 @@ function addPluginEntry(configDir: string, url: string, branch?: string): { name
   if (!entries.some((e) => e.name === name)) {
     const entry: Record<string, unknown> = { name, url: cleanUrl, enabled: true, autoUpdate: true };
     if (branch) entry.branch = branch;
+    if (sync) entry.sync = true;
     entries.push(entry);
     fs.writeFileSync(file, JSON.stringify(entries, null, 2), "utf8");
     console.log(`Added ${name} to ${file}`);
@@ -127,9 +130,10 @@ async function setupEntry(
   updater: { updatePluginPublic: (name: string, url: string, branch?: string) => Promise<unknown> },
   configDir: string,
   url: string,
-  branch?: string
+  branch?: string,
+  sync?: boolean
 ): Promise<void> {
-  const entry = addPluginEntry(configDir, url, branch);
+  const entry = addPluginEntry(configDir, url, branch, sync);
   console.log(`Setting up ${entry.name}...`);
   try {
     await updater.updatePluginPublic(entry.name, entry.url, entry.branch);
@@ -142,7 +146,7 @@ async function setupEntry(
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
   if (!["init", "add", "run", "remove"].includes(parsed.command)) {
-    console.log("usage: plugin-updater <init|add|remove|run> [git-urls-or-names...] [--app claude|opencode] [--branch name]");
+    console.log("usage: plugin-updater <init|add|remove|run> [git-urls-or-names...] [--app claude|opencode] [--branch name] [--sync]");
     process.exit(parsed.command ? 1 : 0);
   }
 
@@ -159,13 +163,13 @@ async function main(): Promise<void> {
     if (app === "claude") registerClaudeHook(configDir);
     else registerOpencodePlugin(configDir);
     for (const url of parsed.urls) {
-      await setupEntry(updater, configDir, url, parsed.branch);
+      await setupEntry(updater, configDir, url, parsed.branch, parsed.sync);
     }
     console.log("Init complete.");
   } else if (parsed.command === "add") {
     if (parsed.urls.length === 0) throw new Error("add requires at least one git url");
     for (const url of parsed.urls) {
-      await setupEntry(updater, configDir, url, parsed.branch);
+      await setupEntry(updater, configDir, url, parsed.branch, parsed.sync);
     }
   } else if (parsed.command === "remove") {
     if (parsed.urls.length === 0) throw new Error("remove requires at least one plugin name");

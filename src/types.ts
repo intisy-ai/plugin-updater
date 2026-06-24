@@ -5,6 +5,7 @@ export interface Plugin {
   enabled?: boolean;
   autoUpdate?: boolean;
   updateInterval?: number; // hours between git fetch checks, default 1
+  sync?: boolean; // mirror this entry into the other app's plugins.json (via sync-bridge)
 }
 
 export interface NpmPlugin {

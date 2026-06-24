@@ -4,6 +4,7 @@ import { getPlugins, readOpencodeJson } from "./config.js";
 import { selfUpdate, updateNpmPlugin } from "./npm.js";
 import { updatePlugin } from "./git.js";
 import { deployToExecutionDir } from "./deploy.js";
+import { syncPluginsAcrossApps } from "./syncbridge.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
@@ -52,6 +53,11 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   if (isOpencodeHookInvocation(configDir)) return {};
   setEarlyLaunchConfigDir(configDir);
   writeLog("Starting earlyLaunch updater sequence");
+
+  // pull in any `sync: true` plugins from the other app BEFORE building, then
+  // re-read the list so a freshly-synced-in plugin is cloned/built this pass.
+  await syncPluginsAcrossApps(configDir);
+  plugins = getPlugins(configDir);
 
   selfUpdate(configDir);
 
@@ -110,4 +116,9 @@ export async function activate(opencodeHookInput?: unknown): Promise<void | obje
 
 // consumers like the loader TUI import this module for its API only — running
 // the full updater sequence on import would print over their screen
-if (process.env.PLUGIN_UPDATER_LIBRARY_MODE !== "1") activate();
+if (process.env.PLUGIN_UPDATER_LIBRARY_MODE !== "1") {
+  // signal loaders (which activate later in the same process) that we are
+  // self-driving updates, so their runEarlyLaunchHooks skips a duplicate pass
+  process.env.PLUGIN_UPDATER_ACTIVATION = "1";
+  activate();
+}
