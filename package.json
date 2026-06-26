@@ -22,6 +22,7 @@
   ],
   "files": [
     "dist/",
+    "core/dist/",
     "README.md",
     "LICENSE"
   ],
@@ -29,7 +30,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "npx esbuild core/src/index.ts --bundle --platform=node --format=esm --outfile=core/dist/index.js && tsc",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {

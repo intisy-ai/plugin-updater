@@ -5,9 +5,17 @@ import { selfUpdate, updateNpmPlugin } from "./npm.js";
 import { updatePlugin } from "./git.js";
 import { deployToExecutionDir } from "./deploy.js";
 import { syncPluginsAcrossApps } from "./syncbridge.js";
+// @ts-ignore — generated bundle, no .d.ts
+import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
+
+// `node dist/index.js config …` (from the /plugin-updater-config command) runs the
+// config CLI and exits, before the self-activation/updater sequence below.
+if (await maybeRunCli()) {
+  process.exit(0);
+}
 
 // remove repos/ clones and deployed plugin/ files for plugins no longer in
 // plugins.json, so a removed/renamed plugin stops showing up
@@ -53,6 +61,9 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   if (isOpencodeHookInvocation(configDir)) return {};
   setEarlyLaunchConfigDir(configDir);
   writeLog("Starting earlyLaunch updater sequence");
+
+  // keep the cross-app /plugin-updater-config command deployed (idempotent)
+  try { deployUpdaterCommands(); } catch { /* best-effort */ }
 
   // pull in any `sync: true` plugins from the other app BEFORE building, then
   // re-read the list so a freshly-synced-in plugin is cloned/built this pass.
