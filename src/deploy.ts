@@ -89,6 +89,14 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
     deploySource = path.join(distPath, "index.js");
   }
 
+  // the build may have produced nothing (e.g. it failed, or the repo was deployed
+  // bundle-only with its source stripped) — skip gracefully rather than throwing
+  // ENOENT on the copy. Any already-deployed plugin/<name>.js stays in place.
+  if (!fs.existsSync(deploySource)) {
+    writeLog(`Skipping deploy for ${pluginName}: built file not found at ${deploySource}`, true);
+    return fs.existsSync(pluginExecutionFile);
+  }
+
   if (!fs.existsSync(executionPath)) fs.mkdirSync(executionPath, { recursive: true });
   await callPluginCleanup(pluginExecutionFile, configDir);
 

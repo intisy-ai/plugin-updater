@@ -114,6 +114,16 @@ function addPluginEntry(configDir: string, url: string, branch?: string, sync?: 
     entries.push(entry);
     fs.writeFileSync(file, JSON.stringify(entries, null, 2), "utf8");
     console.log(`Added ${name} to ${file}`);
+  } else if (sync) {
+    // already present: honor --sync by enabling sync on the existing entry
+    const existing = entries.find((e) => e.name === name);
+    if (existing && existing.sync !== true) {
+      existing.sync = true;
+      fs.writeFileSync(file, JSON.stringify(entries, null, 2), "utf8");
+      console.log(`Enabled sync on ${name} in ${file}`);
+    } else {
+      console.log(`${name} already present (sync on) in ${file}`);
+    }
   } else {
     console.log(`${name} already present in ${file}`);
   }
