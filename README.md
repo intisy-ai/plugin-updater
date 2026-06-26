@@ -29,8 +29,8 @@ flowchart TD
 
     %% External & Storage
     subgraph Storage_and_Network [Storage & External]
-        GH_REPOS[GitHub (intisy/plugin-*)]
-        LOCAL_WORKSPACE[(.config/github/repos/intisy/)]
+        GH_REPOS[GitHub (intisy-ai/plugin-*)]
+        LOCAL_WORKSPACE[(.config/github/repos/intisy-ai/)]
         CC_PLUGINS[(.claude/plugin/)]
         OC_PLUGINS[(.config/opencode/plugin/)]
         
@@ -43,15 +43,15 @@ flowchart TD
 
 ## Cross-app plugin sync (`sync: true`)
 
-A `plugins.json` entry flagged `sync: true` is mirrored into the **other** app's `plugins.json`, so a plugin enabled in OpenCode is also installed in Claude Code (and vice versa). At the start of `earlyLaunch`, plugin-updater loads [sync-bridge](https://github.com/intisy/sync-bridge)'s library bundle (`dist/lib.js`) and calls `syncPlugins()`, then re-reads the list so a freshly-synced-in plugin is cloned and built in the **same** launch. It is additive (never removes) and a no-op when sync-bridge isn't installed.
+A `plugins.json` entry flagged `sync: true` is mirrored into the **other** app's `plugins.json`, so a plugin enabled in OpenCode is also installed in Claude Code (and vice versa). At the start of `earlyLaunch`, plugin-updater loads [sync-bridge](https://github.com/intisy-ai/sync-bridge)'s library bundle (`dist/lib.js`) and calls `syncPlugins()`, then re-reads the list so a freshly-synced-in plugin is cloned and built in the **same** launch. It is additive (never removes) and a no-op when sync-bridge isn't installed.
 
 ```jsonc
-{ "name": "antigravity-auth", "url": "https://github.com/intisy/antigravity-auth", "enabled": true, "autoUpdate": false, "sync": true }
+{ "name": "antigravity-auth", "url": "https://github.com/intisy-ai/antigravity-auth", "enabled": true, "autoUpdate": false, "sync": true }
 ```
 
 Set it from the CLI with `--sync`:
 ```bash
-plugin-updater add https://github.com/intisy/antigravity-auth --sync
+plugin-updater add https://github.com/intisy-ai/antigravity-auth --sync
 ```
 
 ## API
