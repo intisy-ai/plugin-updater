@@ -115,10 +115,12 @@ export async function activate(opencodeHookInput?: unknown): Promise<void | obje
 }
 
 // consumers like the loader TUI import this module for its API only — running
-// the full updater sequence on import would print over their screen
-if (process.env.PLUGIN_UPDATER_LIBRARY_MODE !== "1") {
-  // signal loaders (which activate later in the same process) that we are
-  // self-driving updates, so their runEarlyLaunchHooks skips a duplicate pass
+// the full updater sequence on import would print over their screen.
+// The ACTIVATION guard makes self-activation idempotent PER PROCESS: opencode may
+// load plugin-updater as more than one module instance (its npm-plugin copy plus a
+// loader's separately-resolved copy), and each would otherwise run earlyLaunch. The
+// first sets the flag; later instances (and the loaders' runEarlyLaunchHooks) skip.
+if (process.env.PLUGIN_UPDATER_LIBRARY_MODE !== "1" && process.env.PLUGIN_UPDATER_ACTIVATION !== "1") {
   process.env.PLUGIN_UPDATER_ACTIVATION = "1";
   activate();
 }
