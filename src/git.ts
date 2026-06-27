@@ -5,7 +5,10 @@ import { execSync } from "child_process";
 import { getReposDir } from "./env.js";
 import { writeLog } from "./log.js";
 
-const BUILD_OUTPUT_DIRS = ["dist", path.join("core", "dist")];
+// dirs copied back from the temp build into the repo clone. core-loader/dist holds
+// the loaders' TUI (tui.js), run as a separate process — without it `oc`/`cc` find
+// no TUI and fall through to plain opencode/claude.
+const BUILD_OUTPUT_DIRS = ["dist", path.join("core", "dist"), path.join("core-loader", "dist")];
 
 export function executeGit(command: string, cwd: string): boolean {
   writeLog(`Executing git: ${command} in ${cwd}`);
