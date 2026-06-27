@@ -7,6 +7,8 @@ import { deployToExecutionDir } from "./deploy.js";
 import { syncPluginsAcrossApps } from "./syncbridge.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
+// @ts-ignore — generated bundle, no .d.ts
+import { ensureConfig } from "../lib/core.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
@@ -62,8 +64,10 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   setEarlyLaunchConfigDir(configDir);
   writeLog("Starting earlyLaunch updater sequence");
 
-  // keep the cross-app /plugin-updater-config command deployed (idempotent)
+  // keep the cross-app /plugin-updater-config command deployed (idempotent) + the
+  // config file materialized (so it's discoverable in the home / agentbox data folder)
   try { deployUpdaterCommands(); } catch { /* best-effort */ }
+  try { ensureConfig("plugin-updater", { logging: true }); } catch { /* best-effort */ }
 
   // pull in any `sync: true` plugins from the other app BEFORE building, then
   // re-read the list so a freshly-synced-in plugin is cloned/built this pass.
