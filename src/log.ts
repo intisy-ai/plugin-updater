@@ -5,8 +5,9 @@
 import fs from "fs";
 import path from "path";
 import { getAppConfigDir, getAppName } from "./env.js";
-// @ts-ignore — generated bundle, no .d.ts
-import { makeWriteLog } from "../core/dist/index.js";
+// @ts-ignore — generated bundle (core, esbuild-bundled to lib/ so it ships in the
+// npm tarball; the submodule's own core/dist is gitignored and never published)
+import { makeWriteLog } from "../lib/core.js";
 
 let pluginConfig: Record<string, unknown> | null = null;
 

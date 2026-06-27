@@ -4,7 +4,7 @@
 // so the command shells into this same bundle's index.js by its absolute path.
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { runConfigCli, deployCommands } from "../core/dist/index.js";
+import { runConfigCli, deployCommands } from "../lib/core.js";
 
 const PLUGIN = "plugin-updater";
 // the deployed entry that carries the maybeRunCli guard (dist/index.js, sibling).
