@@ -8,13 +8,16 @@ import { syncPluginsAcrossApps } from "./syncbridge.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { ensureConfig } from "../lib/core.js";
+import { defineConfig } from "../lib/core.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
 
 // `node dist/index.js config …` (from the /plugin-updater-config command) runs the
 // config CLI and exits, before the self-activation/updater sequence below.
+// Register config defaults BEFORE the CLI guard so `config schema` sees them (no write).
+defineConfig("plugin-updater", { logging: true });
+
 if (await maybeRunCli()) {
   process.exit(0);
 }
@@ -67,7 +70,6 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   // keep the cross-app /plugin-updater-config command deployed (idempotent) + the
   // config file materialized (so it's discoverable in the home / agentbox data folder)
   try { deployUpdaterCommands(); } catch { /* best-effort */ }
-  try { ensureConfig("plugin-updater", { logging: true }); } catch { /* best-effort */ }
 
   // pull in any `sync: true` plugins from the other app BEFORE building, then
   // re-read the list so a freshly-synced-in plugin is cloned/built this pass.
