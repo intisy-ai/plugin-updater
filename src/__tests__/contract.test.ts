@@ -8,6 +8,6 @@ runPluginContract({
   entry: "dist/index.js",
   configName: "plugin-updater",
   app: "both",
-  commands: ["plugin-updater-config"],
+  commands: ["plugin-updater-config", "config"],
   deploy: { module: "dist/commands.js", fn: "deployUpdaterCommands", arg: "none" },
 });
