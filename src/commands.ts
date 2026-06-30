@@ -10,7 +10,6 @@ import { dirname, join } from "path";
 import fs from "fs";
 import { runConfigCli, runAllConfigCli, deployCommands, getAppConfigDir as coreGetAppConfigDir } from "../lib/core.js";
 import { getPlugins } from "./config.js";
-import { getAppName } from "./env.js";
 
 const PLUGIN = "plugin-updater";
 const SELF = join(dirname(fileURLToPath(import.meta.url)), "index.js");
