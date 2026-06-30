@@ -75,8 +75,8 @@ export interface InitAppDeps {
 // Decide which app(s) `init` targets. Explicit --app always wins. A single detected
 // app is used directly. When both or neither are detected we PROMPT (if interactive)
 // so the user can pick one or both; non-interactively we keep the hard error rather
-// than guess. The prompt default is the cwd-inferred app, or null (no default) when
-// the cwd gives no signal.
+// than guess. The prompt default is the cwd-inferred app when the cwd is a config dir,
+// otherwise "both" (a neutral dir like /workspace defaults to setting up both apps).
 export async function resolveInitApps(explicit: string | undefined, deps: InitAppDeps): Promise<string[]> {
   if (explicit === "claude" || explicit === "opencode") return [explicit];
   if (explicit) throw new Error(`Unknown app "${explicit}" - use claude or opencode`);
@@ -87,5 +87,5 @@ export async function resolveInitApps(explicit: string | undefined, deps: InitAp
   if (!deps.isTTY) {
     throw new Error("Both apps (or neither) found - pass --app claude or --app opencode");
   }
-  return deps.prompt(p, deps.cwdApp());
+  return deps.prompt(p, deps.cwdApp() ?? "both");
 }

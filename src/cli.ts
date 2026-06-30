@@ -143,14 +143,17 @@ async function promptInitApps(_present: PresentApps, defaultApp: string | null):
       "Initialize plugins for which app?",
       `  [1] opencode${defaultApp === "opencode" ? "  (default)" : ""}`,
       `  [2] claude${defaultApp === "claude" ? "  (default)" : ""}`,
-      "  [3] both",
+      `  [3] both${defaultApp === "both" ? "  (default)" : ""}`,
     ].join("\n"));
     for (;;) {
       const ans = (await rl.question(`> ${defaultApp ? `[${defaultApp}] ` : "1/2/3 "}`)).trim().toLowerCase();
       if (ans === "1" || ans === "opencode") return ["opencode"];
       if (ans === "2" || ans === "claude") return ["claude"];
       if (ans === "3" || ans === "both") return ["opencode", "claude"];
-      if (ans === "" && defaultApp) return [defaultApp];
+      if (ans === "") {
+        if (defaultApp === "both") return ["opencode", "claude"];
+        if (defaultApp) return [defaultApp];
+      }
       // empty with no default, or unrecognized → re-ask
     }
   } finally {

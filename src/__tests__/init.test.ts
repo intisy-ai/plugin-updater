@@ -110,15 +110,16 @@ describe("resolveInitApps", () => {
     expect(apps).toEqual(["opencode"]); // cwd default
   });
 
-  it("passes a null default to the prompt when cwd gives no signal", async () => {
+  it("defaults to 'both' when cwd gives no signal", async () => {
     let seenDefault: string | null = "unset";
-    await resolveInitApps(undefined, {
+    const apps = await resolveInitApps(undefined, {
       ...baseDeps,
       cwdApp: () => null,
       present: () => ({ claude: true, opencode: true }),
-      prompt: async (_p, def) => { seenDefault = def; return ["claude"]; },
+      prompt: async (_p, def) => { seenDefault = def; return def === "both" ? ["opencode", "claude"] : [def ?? "none"]; },
     });
-    expect(seenDefault).toBeNull();
+    expect(seenDefault).toBe("both");
+    expect(apps).toEqual(["opencode", "claude"]);
   });
 
   it("can return both apps from the prompt", async () => {
