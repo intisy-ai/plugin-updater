@@ -5,7 +5,7 @@ process.env.PLUGIN_UPDATER_CLI = "1";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { resolveOpencodeConfigPath, insertPluginIntoJsonc, resolveInitApps, type PresentApps } from "./init.js";
+import { resolveOpencodeConfigPath, insertPluginIntoJsonc, resolveInitApps, cwdApp, type PresentApps } from "./init.js";
 
 interface ParsedArgs {
   command: string;
@@ -132,30 +132,27 @@ function presentApps(): PresentApps {
   return { claude, opencode };
 }
 
-// infer the app from the current directory (the prompt's default suggestion)
-function cwdApp(): string | null {
-  const cwd = process.cwd().replace(/\\/g, "/");
-  if (/(^|\/)\.claude(\/|$)/.test(cwd)) return "claude";
-  if (/(^|\/)\.opencode(\/|$)/.test(cwd) || /(^|\/)\.config\/opencode(\/|$)/.test(cwd)) return "opencode";
-  return null;
-}
-
-// interactive picker shown when both/neither app is detected and no --app was passed
-async function promptInitApps(_present: PresentApps, defaultApp: string): Promise<string[]> {
+// interactive picker shown when both/neither app is detected and no --app was passed.
+// defaultApp (cwd-inferred) may be null — then there is no default and an empty answer
+// re-asks rather than guessing.
+async function promptInitApps(_present: PresentApps, defaultApp: string | null): Promise<string[]> {
   const readline = await import("readline/promises");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const menu = [
+    console.log([
       "Initialize plugins for which app?",
       `  [1] opencode${defaultApp === "opencode" ? "  (default)" : ""}`,
       `  [2] claude${defaultApp === "claude" ? "  (default)" : ""}`,
       "  [3] both",
-    ].join("\n");
-    const ans = (await rl.question(`${menu}\n> [${defaultApp}] `)).trim().toLowerCase();
-    if (ans === "3" || ans === "both") return ["opencode", "claude"];
-    if (ans === "1" || ans === "opencode") return ["opencode"];
-    if (ans === "2" || ans === "claude") return ["claude"];
-    return [defaultApp];
+    ].join("\n"));
+    for (;;) {
+      const ans = (await rl.question(`> ${defaultApp ? `[${defaultApp}] ` : "1/2/3 "}`)).trim().toLowerCase();
+      if (ans === "1" || ans === "opencode") return ["opencode"];
+      if (ans === "2" || ans === "claude") return ["claude"];
+      if (ans === "3" || ans === "both") return ["opencode", "claude"];
+      if (ans === "" && defaultApp) return [defaultApp];
+      // empty with no default, or unrecognized → re-ask
+    }
   } finally {
     rl.close();
   }

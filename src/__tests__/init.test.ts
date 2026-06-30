@@ -1,5 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { resolveOpencodeConfigPath, insertPluginIntoJsonc, resolveInitApps } from "../init.js";
+import { resolveOpencodeConfigPath, insertPluginIntoJsonc, resolveInitApps, cwdApp } from "../init.js";
+
+describe("cwdApp", () => {
+  it("returns opencode in the opencode config dir", () => {
+    expect(cwdApp("/root/.config/opencode")).toBe("opencode");
+    expect(cwdApp("/home/me/.opencode")).toBe("opencode");
+  });
+  it("returns claude in the claude config dir", () => {
+    expect(cwdApp("/root/.claude")).toBe("claude");
+  });
+  it("returns null outside a config dir (e.g. /workspace)", () => {
+    expect(cwdApp("/workspace")).toBeNull();
+    expect(cwdApp("/projects/my-opencode-plugin")).toBeNull(); // substring must not match
+  });
+});
 
 describe("resolveOpencodeConfigPath", () => {
   it("prefers an existing opencode.json", () => {
@@ -92,8 +106,19 @@ describe("resolveInitApps", () => {
   });
 
   it("prompts when both are detected and interactive", async () => {
-    const apps = await resolveInitApps(undefined, { ...baseDeps, present: () => ({ claude: true, opencode: true }), prompt: async (_p, def) => [def] });
+    const apps = await resolveInitApps(undefined, { ...baseDeps, present: () => ({ claude: true, opencode: true }), prompt: async (_p, def) => [def ?? "none"] });
     expect(apps).toEqual(["opencode"]); // cwd default
+  });
+
+  it("passes a null default to the prompt when cwd gives no signal", async () => {
+    let seenDefault: string | null = "unset";
+    await resolveInitApps(undefined, {
+      ...baseDeps,
+      cwdApp: () => null,
+      present: () => ({ claude: true, opencode: true }),
+      prompt: async (_p, def) => { seenDefault = def; return ["claude"]; },
+    });
+    expect(seenDefault).toBeNull();
   });
 
   it("can return both apps from the prompt", async () => {

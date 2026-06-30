@@ -55,17 +55,28 @@ export interface PresentApps {
   opencode: boolean;
 }
 
+// Infer the app ONLY from the current directory actually being an app's config dir
+// (~/.claude or ~/.config/opencode|~/.opencode). Returns null otherwise — e.g. /workspace
+// — so the prompt offers no default rather than silently assuming opencode.
+export function cwdApp(cwd: string = process.cwd()): string | null {
+  const c = cwd.replace(/\\/g, "/");
+  if (/(^|\/)\.claude(\/|$)/.test(c)) return "claude";
+  if (/(^|\/)\.opencode(\/|$)/.test(c) || /(^|\/)\.config\/opencode(\/|$)/.test(c)) return "opencode";
+  return null;
+}
+
 export interface InitAppDeps {
-  present: () => PresentApps;          // which apps are installed/detected
-  isTTY: boolean;                      // are we interactive (can we prompt)?
-  cwdApp: () => string | null;         // app inferred from the current dir (the prompt default)
-  prompt: (present: PresentApps, defaultApp: string) => Promise<string[]>;
+  present: () => PresentApps;                 // which apps are installed/detected
+  isTTY: boolean;                             // are we interactive (can we prompt)?
+  cwdApp: () => string | null;                // app inferred from the current dir, or null
+  prompt: (present: PresentApps, defaultApp: string | null) => Promise<string[]>;
 }
 
 // Decide which app(s) `init` targets. Explicit --app always wins. A single detected
 // app is used directly. When both or neither are detected we PROMPT (if interactive)
 // so the user can pick one or both; non-interactively we keep the hard error rather
-// than guess.
+// than guess. The prompt default is the cwd-inferred app, or null (no default) when
+// the cwd gives no signal.
 export async function resolveInitApps(explicit: string | undefined, deps: InitAppDeps): Promise<string[]> {
   if (explicit === "claude" || explicit === "opencode") return [explicit];
   if (explicit) throw new Error(`Unknown app "${explicit}" - use claude or opencode`);
@@ -76,6 +87,5 @@ export async function resolveInitApps(explicit: string | undefined, deps: InitAp
   if (!deps.isTTY) {
     throw new Error("Both apps (or neither) found - pass --app claude or --app opencode");
   }
-  const defaultApp = deps.cwdApp() ?? "opencode";
-  return deps.prompt(p, defaultApp);
+  return deps.prompt(p, deps.cwdApp());
 }
