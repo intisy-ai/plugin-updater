@@ -24,6 +24,7 @@ defineConfig("plugin-updater", {
   build_timeout_seconds: 300,
   daemon_health_timeout_ms: 1500,
   self_update: true,
+  update_on_launch: true,
 });
 
 if (await maybeRunCli()) {
@@ -91,18 +92,26 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   await syncPluginsAcrossApps(configDir);
   plugins = getPlugins(configDir);
 
-  if (cfg.self_update !== false) selfUpdate(configDir);
+  const updateOnLaunch = cfg.update_on_launch !== false;
+
+  // update_on_launch:false suppresses remote-update work (selfUpdate, npm
+  // updates, and git pull/rebuild for already-cloned plugins). Plugins that
+  // have never been cloned still get a full clone+build so a freshly-added
+  // plugin is usable immediately even in manual-update mode.
+  if (updateOnLaunch && cfg.self_update !== false) selfUpdate(configDir);
 
   // npm plugins listed in opencode.json
-  const { plugins: npmNames } = readOpencodeJson(configDir);
-  for (const raw of npmNames) {
-    const name = raw.replace(/@[^@/]+$/, "") || raw;
-    if (name === "plugin-updater") continue; // already self-updated above
-    writeLog(`npm earlyLaunch update for ${name}`);
-    try {
-      updateNpmPlugin(name, configDir);
-    } catch (e: unknown) {
-      writeLog(`Failed npm update for ${name}: ${(e as { message: string }).message}`, true);
+  if (updateOnLaunch) {
+    const { plugins: npmNames } = readOpencodeJson(configDir);
+    for (const raw of npmNames) {
+      const name = raw.replace(/@[^@/]+$/, "") || raw;
+      if (name === "plugin-updater") continue; // already self-updated above
+      writeLog(`npm earlyLaunch update for ${name}`);
+      try {
+        updateNpmPlugin(name, configDir);
+      } catch (e: unknown) {
+        writeLog(`Failed npm update for ${name}: ${(e as { message: string }).message}`, true);
+      }
     }
   }
 
@@ -114,8 +123,17 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   for (const plugin of plugins) {
     // absence of the enabled key means enabled, matching the loader TUI
     if (plugin.enabled === false) { writeLog(`Skipping disabled plugin ${plugin.name}`); continue; }
-    if (plugin.autoUpdate === false) { writeLog(`Skipping auto-update for ${plugin.name} (autoUpdate off)`); continue; }
     if (!plugin.url) { writeLog(`Skipping ${plugin.name}: no url in plugins.json`, true); continue; }
+
+    // when update_on_launch is false, skip update+deploy for already-cloned
+    // plugins; only do a full clone+build for plugins not yet on disk
+    const repoDir = path.join(configDir, "repos", plugin.name);
+    if (!updateOnLaunch && fs.existsSync(repoDir)) {
+      writeLog(`Skipping update for ${plugin.name} (update_on_launch disabled, already cloned)`);
+      continue;
+    }
+
+    if (plugin.autoUpdate === false && updateOnLaunch) { writeLog(`Skipping auto-update for ${plugin.name} (autoUpdate off)`); continue; }
 
     writeLog(`Processing earlyLaunch for ${plugin.name}`);
     try {
