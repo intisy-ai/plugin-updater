@@ -5,6 +5,7 @@ process.env.PLUGIN_UPDATER_CLI = "1";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { resolveOpencodeConfigPath, insertPluginIntoJsonc, resolveInitApps, type PresentApps } from "./init.js";
 
 interface ParsedArgs {
   command: string;
@@ -89,16 +90,75 @@ function registerClaudeHook(configDir: string): void {
 }
 
 function registerOpencodePlugin(configDir: string): void {
-  const ocPath = path.join(configDir, "opencode.json");
-  const oc = (fs.existsSync(ocPath) ? readJson(ocPath) : {}) ?? {};
-  const plugins = Array.isArray(oc.plugin) ? (oc.plugin as string[]) : [];
-  if (!plugins.some((p) => p === "plugin-updater" || p.startsWith("plugin-updater@"))) {
-    plugins.unshift("plugin-updater");
+  // Edit the EXISTING opencode config (opencode.json, else opencode.jsonc) rather than
+  // always creating opencode.json — opencode reads either and two files are confusing.
+  const ocPath = resolveOpencodeConfigPath(configDir);
+  const exists = fs.existsSync(ocPath);
+  const raw = exists ? fs.readFileSync(ocPath, "utf8") : "";
+  const parsed = (exists ? readJson(ocPath) : null) ?? null;
+  // opencode plugin entries may be a string OR a [name, options] tuple — guard accordingly
+  const plugins = Array.isArray(parsed?.plugin) ? (parsed!.plugin as unknown[]) : [];
+  const has = plugins.some((p) =>
+    p === "plugin-updater"
+    || (typeof p === "string" && p.startsWith("plugin-updater@"))
+    || (Array.isArray(p) && p[0] === "plugin-updater"));
+  if (has) {
+    console.log(`plugin-updater already registered in ${ocPath}`);
+    return;
   }
-  oc.plugin = plugins;
+  // Comment-preserving in-place insert for an existing file; fall back to a fresh JSON
+  // write only when there's no file or the text can't be safely edited.
+  if (exists && raw.trim()) {
+    const edited = insertPluginIntoJsonc(raw, "plugin-updater", Array.isArray(parsed?.plugin));
+    if (edited) {
+      fs.writeFileSync(ocPath, edited, "utf8");
+      console.log(`Registered plugin-updater in ${ocPath}`);
+      return;
+    }
+  }
+  const oc = (parsed ?? {}) as Record<string, unknown>;
+  oc.plugin = ["plugin-updater", ...plugins];
   if (!oc.$schema) oc.$schema = "https://opencode.ai/config.json";
   fs.writeFileSync(ocPath, JSON.stringify(oc, null, 2), "utf8");
   console.log(`Registered plugin-updater in ${ocPath}`);
+}
+
+// which apps are installed on this machine (used when no --app is given)
+function presentApps(): PresentApps {
+  const claude = fs.existsSync(path.join(os.homedir(), ".claude")) || binaryExists("claude");
+  const opencode = fs.existsSync(path.join(os.homedir(), ".opencode"))
+    || fs.existsSync(path.join(os.homedir(), ".config", "opencode"))
+    || binaryExists("opencode");
+  return { claude, opencode };
+}
+
+// infer the app from the current directory (the prompt's default suggestion)
+function cwdApp(): string | null {
+  const cwd = process.cwd().replace(/\\/g, "/");
+  if (/(^|\/)\.claude(\/|$)/.test(cwd)) return "claude";
+  if (/(^|\/)\.opencode(\/|$)/.test(cwd) || /(^|\/)\.config\/opencode(\/|$)/.test(cwd)) return "opencode";
+  return null;
+}
+
+// interactive picker shown when both/neither app is detected and no --app was passed
+async function promptInitApps(_present: PresentApps, defaultApp: string): Promise<string[]> {
+  const readline = await import("readline/promises");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const menu = [
+      "Initialize plugins for which app?",
+      `  [1] opencode${defaultApp === "opencode" ? "  (default)" : ""}`,
+      `  [2] claude${defaultApp === "claude" ? "  (default)" : ""}`,
+      "  [3] both",
+    ].join("\n");
+    const ans = (await rl.question(`${menu}\n> [${defaultApp}] `)).trim().toLowerCase();
+    if (ans === "3" || ans === "both") return ["opencode", "claude"];
+    if (ans === "1" || ans === "opencode") return ["opencode"];
+    if (ans === "2" || ans === "claude") return ["claude"];
+    return [defaultApp];
+  } finally {
+    rl.close();
+  }
 }
 
 function addPluginEntry(configDir: string, url: string, branch?: string, sync?: boolean): { name: string; url: string; branch?: string } {
@@ -160,23 +220,40 @@ async function main(): Promise<void> {
     process.exit(parsed.command ? 1 : 0);
   }
 
+  const updater = await import("./index.js");
+
+  // `init` may target one or both apps: explicit --app wins; otherwise a single
+  // detected app is used, and an ambiguous (both/neither) interactive run is prompted.
+  if (parsed.command === "init") {
+    const apps = await resolveInitApps(parsed.app, {
+      present: presentApps,
+      isTTY: Boolean(process.stdin.isTTY),
+      cwdApp,
+      prompt: promptInitApps,
+    });
+    for (const app of apps) {
+      process.env.PLUGIN_UPDATER_APP = app;
+      const configDir = getConfigDir(app);
+      if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+      console.log(`App: ${app} (${configDir})`);
+      ensurePluginsJson(configDir);
+      if (app === "claude") registerClaudeHook(configDir);
+      else registerOpencodePlugin(configDir);
+      for (const url of parsed.urls) {
+        await setupEntry(updater, configDir, url, parsed.branch, parsed.sync);
+      }
+    }
+    console.log("Init complete.");
+    return;
+  }
+
   const app = detectApp(parsed.app);
   process.env.PLUGIN_UPDATER_APP = app;
   const configDir = getConfigDir(app);
   if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
   console.log(`App: ${app} (${configDir})`);
 
-  const updater = await import("./index.js");
-
-  if (parsed.command === "init") {
-    ensurePluginsJson(configDir);
-    if (app === "claude") registerClaudeHook(configDir);
-    else registerOpencodePlugin(configDir);
-    for (const url of parsed.urls) {
-      await setupEntry(updater, configDir, url, parsed.branch, parsed.sync);
-    }
-    console.log("Init complete.");
-  } else if (parsed.command === "add") {
+  if (parsed.command === "add") {
     if (parsed.urls.length === 0) throw new Error("add requires at least one git url");
     for (const url of parsed.urls) {
       await setupEntry(updater, configDir, url, parsed.branch, parsed.sync);
