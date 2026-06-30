@@ -8,7 +8,7 @@ import { syncPluginsAcrossApps } from "./syncbridge.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { defineConfig } from "../lib/core.js";
+import { defineConfig, loadConfig } from "../lib/core.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
@@ -16,7 +16,15 @@ import type { Plugin } from "./types.js";
 // `node dist/index.js config …` (from the /plugin-updater-config command) runs the
 // config CLI and exits, before the self-activation/updater sequence below.
 // Register config defaults BEFORE the CLI guard so `config schema` sees them (no write).
-defineConfig("plugin-updater", { logging: true });
+defineConfig("plugin-updater", {
+  logging: true,
+  default_update_interval_hours: 1,
+  git_timeout_seconds: 120,
+  npm_timeout_seconds: 300,
+  build_timeout_seconds: 300,
+  daemon_health_timeout_ms: 1500,
+  self_update: true,
+});
 
 if (await maybeRunCli()) {
   process.exit(0);
@@ -67,6 +75,13 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   setEarlyLaunchConfigDir(configDir);
   writeLog("Starting earlyLaunch updater sequence");
 
+  // read config once for the whole earlyLaunch sequence
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cfg = loadConfig("plugin-updater") as Record<string, any>;
+  const defaultIntervalHours = typeof cfg.default_update_interval_hours === "number"
+    ? cfg.default_update_interval_hours
+    : 1;
+
   // keep the cross-app /plugin-updater-config command deployed (idempotent) + the
   // config file materialized (so it's discoverable in the home / agentbox data folder)
   try { deployUpdaterCommands(); } catch { /* best-effort */ }
@@ -76,7 +91,7 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   await syncPluginsAcrossApps(configDir);
   plugins = getPlugins(configDir);
 
-  selfUpdate(configDir);
+  if (cfg.self_update !== false) selfUpdate(configDir);
 
   // npm plugins listed in opencode.json
   const { plugins: npmNames } = readOpencodeJson(configDir);
@@ -104,7 +119,7 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
 
     writeLog(`Processing earlyLaunch for ${plugin.name}`);
     try {
-      const updateResult = updatePlugin(plugin.name, plugin.url, plugin.branch, null, plugin.updateInterval ?? 1);
+      const updateResult = updatePlugin(plugin.name, plugin.url, plugin.branch, null, plugin.updateInterval ?? defaultIntervalHours);
       if (!updateResult.success) {
         writeLog(`Skipping deploy for ${plugin.name}: update failed`, true);
         continue;

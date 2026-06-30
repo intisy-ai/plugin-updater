@@ -6,6 +6,15 @@ import { isOpencodeHookInvocation } from "./env.js";
 import { writeLog } from "./log.js";
 import { readOpencodeJson, writeOpencodeJson } from "./config.js";
 import type { NpmPlugin } from "./types.js";
+// @ts-ignore — generated bundle, no .d.ts
+import { loadConfig } from "../lib/core.js";
+
+function getNpmTimeoutMs(): number {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cfg = loadConfig("plugin-updater") as Record<string, any>;
+  const seconds = typeof cfg.npm_timeout_seconds === "number" ? cfg.npm_timeout_seconds : 300;
+  return seconds * 1000;
+}
 
 let npmGlobalRoot: string | null = null;
 
@@ -71,7 +80,7 @@ export function installNpmPlugin(name: string, configDir: string): string {
       (raw.plugin as string[] | undefined) = [...plugins, name];
       writeOpencodeJson(configDir, raw);
     }
-    execSync(`npm install -g ${name}`, { stdio: "pipe" });
+    execSync(`npm install -g ${name}`, { stdio: "pipe", timeout: getNpmTimeoutMs() });
     writeLog(`Installed npm plugin: ${name}`);
     return "";
   } catch (e: unknown) {
@@ -91,7 +100,7 @@ export function uninstallNpmPlugin(name: string, configDir: string): string {
       return pName !== name;
     });
     writeOpencodeJson(configDir, raw);
-    execSync(`npm uninstall -g ${name}`, { stdio: "pipe" });
+    execSync(`npm uninstall -g ${name}`, { stdio: "pipe", timeout: getNpmTimeoutMs() });
     writeLog(`Uninstalled npm plugin: ${name}`);
     return "";
   } catch (e: unknown) {
@@ -118,7 +127,7 @@ export function updateNpmPlugin(name: string, configDir: string, updateInterval 
       return "";
     }
     fs.writeFileSync(checkFile, Date.now().toString());
-    execSync(`npm update -g ${name}`, { stdio: "pipe" });
+    execSync(`npm update -g ${name}`, { stdio: "pipe", timeout: getNpmTimeoutMs() });
     writeLog(`Updated npm plugin: ${name}`);
     return "";
   } catch (e: unknown) {

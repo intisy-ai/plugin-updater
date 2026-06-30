@@ -3,11 +3,16 @@ import path from "path";
 import { getAppName } from "./env.js";
 import { writeLog } from "./log.js";
 import type { DaemonManifest } from "./types.js";
+// @ts-ignore — generated bundle, no .d.ts
+import { loadConfig } from "../lib/core.js";
 
 async function isDaemonHealthy(url: string): Promise<boolean> {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cfg = loadConfig("plugin-updater") as Record<string, any>;
+    const timeoutMs = typeof cfg.daemon_health_timeout_ms === "number" ? cfg.daemon_health_timeout_ms : 1500;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1500);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timer);
     return res.ok;

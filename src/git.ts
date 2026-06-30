@@ -4,11 +4,27 @@ import os from "os";
 import { execSync } from "child_process";
 import { getReposDir } from "./env.js";
 import { writeLog } from "./log.js";
+// @ts-ignore — generated bundle, no .d.ts
+import { loadConfig } from "../lib/core.js";
 
 // dirs copied back from the temp build into the repo clone. core-loader/dist holds
 // the loaders' TUI (tui.js), run as a separate process — without it `oc`/`cc` find
 // no TUI and fall through to plain opencode/claude.
 const BUILD_OUTPUT_DIRS = ["dist", path.join("core", "dist"), path.join("core-loader", "dist")];
+
+function getGitTimeoutMs(): number {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cfg = loadConfig("plugin-updater") as Record<string, any>;
+  const seconds = typeof cfg.git_timeout_seconds === "number" ? cfg.git_timeout_seconds : 120;
+  return seconds * 1000;
+}
+
+function getBuildTimeoutMs(): number {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cfg = loadConfig("plugin-updater") as Record<string, any>;
+  const seconds = typeof cfg.build_timeout_seconds === "number" ? cfg.build_timeout_seconds : 300;
+  return seconds * 1000;
+}
 
 export function executeGit(command: string, cwd: string): boolean {
   writeLog(`Executing git: ${command} in ${cwd}`);
@@ -16,6 +32,7 @@ export function executeGit(command: string, cwd: string): boolean {
     execSync(command, {
       cwd,
       stdio: "pipe",
+      timeout: getGitTimeoutMs(),
       env: { ...process.env, GCM_INTERACTIVE: "never", GIT_TERMINAL_PROMPT: "0" },
     });
     return true;
@@ -146,13 +163,14 @@ export function buildInTempDir(pluginName: string, sourceDir: string): void {
       },
     });
 
+    const buildTimeoutMs = getBuildTimeoutMs();
     writeLog(`Running npm install for ${pluginName}`);
-    execSync("npm install", { cwd: tempDir, stdio: "pipe" });
+    execSync("npm install", { cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
     writeLog(`Finished npm install for ${pluginName}`);
 
     const pkg = JSON.parse(fs.readFileSync(path.join(tempDir, "package.json"), "utf8")) as { scripts?: { build?: string } };
     if (pkg.scripts?.build) {
-      execSync("npm run build", { cwd: tempDir, stdio: "pipe" });
+      execSync("npm run build", { cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
       writeLog(`Finished npm run build for ${pluginName}`);
     } else {
       writeLog(`Skipped npm run build for ${pluginName} (no build script found)`);
