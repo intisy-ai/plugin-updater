@@ -1,5 +1,9 @@
 # plugin-updater
 
+[![npm version](https://img.shields.io/npm/v/plugin-updater)](https://www.npmjs.com/package/plugin-updater)
+[![npm downloads](https://img.shields.io/npm/dm/plugin-updater)](https://www.npmjs.com/package/plugin-updater)
+[![CI](https://img.shields.io/github/actions/workflow/status/intisy-ai/plugin-updater/publish.yml)](https://github.com/intisy-ai/plugin-updater/actions)
+
 Plugin lifecycle manager for OpenCode and Claude Code launchers. Handles install, update, rebuild, downgrade, and uninstall operations for all plugins.
 
 ## Under-the-Hood Architecture
@@ -10,7 +14,7 @@ flowchart TD
     subgraph Execution_Triggers [Execution Triggers]
         CLI_BOOT[CLI Startup (claude/oc)]
         TUI_MENU[Launcher TUI Actions]
-        
+
         CLI_BOOT -->|Auto-runs hook on start| UPDATER_CORE
         TUI_MENU -->|Manual rebuild/downgrade/uninstall| UPDATER_CORE
     end
@@ -21,7 +25,7 @@ flowchart TD
         API_LAYER[global.OpenCodeAPI Interop]
         GIT_MGR[Git Operations Manager]
         DEPLOYER[Plugin Deployer]
-        
+
         UPDATER_CORE <-->|Requests repo paths| API_LAYER
         UPDATER_CORE -->|Trigger sync| GIT_MGR
         UPDATER_CORE -->|Trigger deploy| DEPLOYER
@@ -33,7 +37,7 @@ flowchart TD
         LOCAL_WORKSPACE[(.config/github/repos/intisy-ai/)]
         CC_PLUGINS[(.claude/plugin/)]
         OC_PLUGINS[(.config/opencode/plugin/)]
-        
+
         GIT_MGR <-->|git clone/pull| GH_REPOS
         GIT_MGR -->|Updates source| LOCAL_WORKSPACE
         DEPLOYER -->|Copies compiled output| CC_PLUGINS
@@ -43,15 +47,29 @@ flowchart TD
 
 ## Structure
 
-- `src/` — TypeScript source (`index` engine + `git`, `npm`, `deploy`, `config`, `log`, `env`, `syncbridge`, `cli`, `commands`).
-- `core/` — git submodule ([`intisy-ai/core`](https://github.com/intisy-ai/core)): shared config + the cross-app command framework, bundled to `core/dist/index.js`.
-- `dist/` — compiled output (generated; not committed). `dist/index.js` is the plugin entry + the `node … config` CLI; `dist/cli.js` is the `plugin-updater` bin.
+- `src/`
+  - TypeScript source (`index` engine + `git`, `npm`, `deploy`, `config`, `log`, `env`, `syncbridge`, `cli`, `commands`).
+- `dist/`
+  - `dist/index.js` — plugin entry + the `node … config` CLI; `dist/cli.js` — the `plugin-updater` bin.
 
 ## Installation
 
-plugin-updater is the one plugin added directly to OpenCode's `opencode.jsonc` (every other plugin goes through `plugins.json`); the loaders also resolve and run it on startup. To add it manually:
+### Via plugin-updater (recommended)
+
 ```bash
-npm install -g plugin-updater
+npx plugin-updater@latest init https://github.com/intisy-ai/plugin-updater
+```
+
+### Via npm
+
+```bash
+npm install plugin-updater
+```
+
+## Adding plugins
+
+plugin-updater is the one plugin added directly to OpenCode's `opencode.jsonc` (every other plugin goes through `plugins.json`); the loaders also resolve and run it on startup. To register a plugin from the CLI:
+```bash
 plugin-updater add https://github.com/intisy-ai/<plugin>      # register a git plugin
 plugin-updater add https://github.com/intisy-ai/<plugin> --sync  # …and mirror it to the other app
 ```
@@ -79,35 +97,52 @@ plugin-updater add https://github.com/intisy-ai/antigravity-auth --sync
 | `uninstall(pluginItem)` | Remove repo and deployed files |
 | `registerTests(testApi)` | Register sync verification tests |
 
-## Commands
-
-Deployed automatically to both apps on each `earlyLaunch` (`~/.config/opencode/command/` and `~/.claude/commands/`):
-
-| Command | Description |
-| --- | --- |
-| `/plugin-updater-config` | View/change plugin-updater config: `list`, `get <key>`, `set <key> <value>`. 100% of the config is reachable here. |
-
-(The loaders own `/plugins`; plugin-updater drives the actual install/update lifecycle behind it.)
-
 ## Configuration
 
-> Config files are **never auto-created on launch** — settings are registered with defaults (core `defineConfig`) and edited in the loader's **Plugins → Configure** screen (or `/<plugin>-config`); a file is written only when you change a value. **Global console logging** for every plugin is toggled in `config/settings.json` (`logConsole: true`, the opencode.json-equivalent).
+Config file: `<configDir>/config/plugin-updater.json` (edit via the loader or `/plugin-updater-config set`).
 
-Config file: `~/.config/opencode/config/plugin-updater.json` (preferred) or `~/.config/opencode/plugin-updater.json` (fallback); same under `~/.claude` for Claude Code.
+```json
+{
+  "logging": true,
+  "default_update_interval_hours": 1,
+  "git_timeout_seconds": 120,
+  "npm_timeout_seconds": 300,
+  "build_timeout_seconds": 300,
+  "daemon_health_timeout_ms": 1500,
+  "self_update": true,
+  "update_on_launch": true
+}
+```
 
-| Key | Type | Default | Description |
-| --- | --- | --- | --- |
-| `logging` | boolean | `true` | Write a per-session log file. Set `false` to disable. |
+| Key | Default |
+| --- | --- |
+| `logging` | `true` |
+| `default_update_interval_hours` | `1` |
+| `git_timeout_seconds` | `120` |
+| `npm_timeout_seconds` | `300` |
+| `build_timeout_seconds` | `300` |
+| `daemon_health_timeout_ms` | `1500` |
+| `self_update` | `true` |
+| `update_on_launch` | `true` |
+
+## Commands
+
+| Command | Description | Arguments |
+| --- | --- | --- |
+| `/plugin-updater-config` | View/change plugin-updater configuration | `list | get <key> | set <key> <value>` |
+| `/config` | View/change ANY plugin's settings and the global settings | `[global | <plugin>] [list | get <key> | set <key> <value>]` |
 
 ## Dependencies
 
-- **`core`** (required) — bundled git submodule (config + command framework); no separate install.
-- **`sync-bridge`** (optional) — loaded at runtime for `syncPlugins()`; absent, cross-app sync no-ops.
+- `core`
+- `sync-bridge`
 
 ## Logging
 
-Logs to `~/.config/opencode/logs/YYYY-MM-DD/plugin-updater-HH-MM-SS.log` (Claude: under `~/.claude/`). Set `"logging": false` to disable.
+Logs are written to `<configDir>/logs/YYYY-MM-DD/plugin-updater-HH-MM-SS.log` and are toggled by
+this plugin's `logging` config (default on). Console mirroring is global, off by default,
+and controlled by the shared `config/settings.json` `logConsole` flag.
 
 ## License
 
-MIT
+MIT.

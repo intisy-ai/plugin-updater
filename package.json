@@ -31,6 +31,7 @@
   },
   "scripts": {
     "build": "npx esbuild core/src/index.ts --bundle --platform=node --format=esm --outfile=lib/core.js && tsc",
+    "postbuild": "node dist/index.js readme",
     "test": "npm run build && vitest run",
     "prepublishOnly": "npm run build"
   },

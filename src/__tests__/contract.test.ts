@@ -10,4 +10,5 @@ runPluginContract({
   app: "both",
   commands: ["plugin-updater-config", "config"],
   deploy: { module: "dist/commands.js", fn: "deployUpdaterCommands", arg: "none" },
+  readme: true,
 });
