@@ -112,8 +112,16 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   await startDeclaredDaemon(sourceDir, configDir, pluginName);
 
   // Claude Code never imports deployed plugin files, so under claude the
-  // updater is the runtime and invokes the plugin's activate() itself
-  if (getAppName() === "claude") {
+  // updater is the runtime and invokes the plugin's activate() itself.
+  // A loader ALSO needs activate() after any deploy — even under opencode —
+  // because a TUI-driven self-update runs inside the `bun tui.js` process (not
+  // opencode), so nothing else refreshes the oc/cc wrapper. Without this, the
+  // wrapper keeps pointing at the stale/rebuilt TUI path and the command breaks
+  // until the next app restart. activate() is idempotent (installs the wrapper,
+  // earlyLaunch is guarded by PLUGIN_UPDATER_ACTIVATION), so the extra call under
+  // opencode's normal launch is harmless.
+  const isLoader = pluginName === "opencode-loader" || pluginName === "claude-code-loader";
+  if (getAppName() === "claude" || isLoader) {
     try {
       const deployed = await import(pluginExecutionFile);
       if (typeof deployed.activate === "function") {
