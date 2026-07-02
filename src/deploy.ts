@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { pathToFileURL } from "url";
 import { execSync } from "child_process";
 import { getAppName, getReposDir } from "./env.js";
 import { writeLog } from "./log.js";
@@ -123,7 +124,12 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   const isLoader = pluginName === "opencode-loader" || pluginName === "claude-code-loader";
   if (getAppName() === "claude" || isLoader) {
     try {
-      const deployed = await import(pluginExecutionFile);
+      // callPluginCleanup() above imported the OLD file at this path, poisoning
+      // Node's ESM cache for it; the copy has since overwritten it with fresh code.
+      // A cache-busting query forces a fresh module load so activate() runs the new
+      // code (otherwise it regenerates the wrapper from the stale, cached module).
+      const freshUrl = `${pathToFileURL(pluginExecutionFile).href}?v=${Date.now()}`;
+      const deployed = await import(freshUrl);
       if (typeof deployed.activate === "function") {
         writeLog(`Activating ${pluginName}`);
         // tells the plugin the updater is the caller, so it must not start

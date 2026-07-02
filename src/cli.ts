@@ -273,7 +273,13 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((e: unknown) => {
-  console.error(String((e as { message?: string }).message ?? e));
-  process.exit(1);
-});
+// Explicitly exit once the run completes. Dynamically-imported plugin/loader
+// modules (deploy.ts) can leave the event loop non-empty (e.g. keepalive refs),
+// which would otherwise hang this task-runner and stall CC's SessionStart hook.
+// Detached daemons are already unref'd, so they survive the parent exiting.
+main()
+  .then(() => process.exit(0))
+  .catch((e: unknown) => {
+    console.error(String((e as { message?: string }).message ?? e));
+    process.exit(1);
+  });
