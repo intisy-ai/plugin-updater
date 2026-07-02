@@ -4,8 +4,18 @@ import { isOpencodeHookInvocation } from "./env.js";
 import { writeLog } from "./log.js";
 import type { Plugin } from "./types.js";
 
+// opencode reads either opencode.json or opencode.jsonc; resolve the one that
+// actually exists (prefer .json) so npm-plugin detection and edits hit the real file.
+export function opencodeConfigPath(configDir: string): string {
+  const json = path.join(configDir, "opencode.json");
+  const jsonc = path.join(configDir, "opencode.jsonc");
+  if (fs.existsSync(json)) return json;
+  if (fs.existsSync(jsonc)) return jsonc;
+  return json;
+}
+
 export function readOpencodeJson(configDir: string): { plugins: string[]; raw: Record<string, unknown> } {
-  const ocPath = path.join(configDir, "opencode.json");
+  const ocPath = opencodeConfigPath(configDir);
   if (!fs.existsSync(ocPath)) return { plugins: [], raw: {} };
   try {
     const stripped = fs.readFileSync(ocPath, "utf8").replace(/^\s*\/\/[^\n]*/gm, "");
@@ -16,8 +26,7 @@ export function readOpencodeJson(configDir: string): { plugins: string[]; raw: R
 }
 
 export function writeOpencodeJson(configDir: string, data: Record<string, unknown>): void {
-  const ocPath = path.join(configDir, "opencode.json");
-  fs.writeFileSync(ocPath, JSON.stringify(data, null, 2), "utf8");
+  fs.writeFileSync(opencodeConfigPath(configDir), JSON.stringify(data, null, 2), "utf8");
 }
 
 export function getPluginsPath(configDir: string): string {
