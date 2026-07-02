@@ -35,7 +35,15 @@ export function getPlugins(configDir: string): Plugin[] {
   if (isOpencodeHookInvocation(configDir)) return [];
   const file = getPluginsPath(configDir);
   try {
-    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf-8"));
+    if (fs.existsSync(file)) {
+      const entries = JSON.parse(fs.readFileSync(file, "utf-8")) as Plugin[];
+      if (!Array.isArray(entries)) return [];
+      // Each loader is app-specific; never manage or show the OTHER app's loader even
+      // if it was mistakenly registered here (e.g. a mixed-container init without --app).
+      const isClaude = configDir.replace(/\\/g, "/").includes("/.claude");
+      const foreignLoader = isClaude ? "opencode-loader" : "claude-code-loader";
+      return entries.filter((e) => e && e.name !== foreignLoader);
+    }
   } catch (e: unknown) {
     writeLog(`Failed to parse ${file}: ${(e as { message: string }).message}`, true);
   }
