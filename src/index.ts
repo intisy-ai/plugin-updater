@@ -2,7 +2,7 @@ import { getAppConfigDir, getAppName, isOpencodeHookInvocation, setEarlyLaunchCo
 import { writeLog } from "./log.js";
 import { getPlugins, readOpencodeJson } from "./config.js";
 import { selfUpdate, updateNpmPlugin } from "./npm.js";
-import { updatePlugin } from "./git.js";
+import { updatePlugin, precomputeRemoteHashes } from "./git.js";
 import { deployToExecutionDir } from "./deploy.js";
 import { syncPluginsAcrossApps } from "./syncbridge.js";
 // @ts-ignore — generated bundle, no .d.ts
@@ -216,6 +216,10 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
     return;
   }
 
+  // One parallel pass of ls-remote for all plugins up front, so the per-plugin
+  // change check below is a local comparison instead of N serial network round-trips.
+  const remoteHashes = updateOnLaunch ? await precomputeRemoteHashes(plugins) : new Map<string, string>();
+
   for (const plugin of plugins) {
     // absence of the enabled key means enabled, matching the loader TUI
     if (plugin.enabled === false) { writeLog(`Skipping disabled plugin ${plugin.name}`); continue; }
@@ -233,7 +237,7 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
 
     writeLog(`Processing earlyLaunch for ${plugin.name}`);
     try {
-      const updateResult = updatePlugin(plugin.name, plugin.url, plugin.branch, null, plugin.updateInterval ?? defaultIntervalHours);
+      const updateResult = updatePlugin(plugin.name, plugin.url, plugin.branch, null, plugin.updateInterval ?? defaultIntervalHours, remoteHashes.get(plugin.name));
       if (!updateResult.success) {
         writeLog(`Skipping deploy for ${plugin.name}: update failed`, true);
         continue;

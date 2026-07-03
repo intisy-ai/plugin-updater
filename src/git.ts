@@ -1,9 +1,38 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { execSync } from "child_process";
+import { execSync, exec } from "child_process";
+import { promisify } from "util";
 import { getReposDir } from "./env.js";
 import { writeLog } from "./log.js";
+
+const execAsync = promisify(exec);
+
+// Fetch each plugin's remote HEAD hash CONCURRENTLY (network I/O) so earlyLaunch's
+// per-plugin change check doesn't serialize N ls-remote round-trips — that was the
+// dominant startup cost (~4s/plugin). Returns name -> remoteHash; a missing entry
+// means "unknown", and updatePlugin then treats it as no-change (offline fallback).
+export async function precomputeRemoteHashes(
+  plugins: Array<{ name: string; url?: string; branch?: string; enabled?: boolean; commitHash?: string | null }>,
+  timeoutMs = 20000,
+): Promise<Map<string, string>> {
+  const reposDir = getReposDir();
+  const out = new Map<string, string>();
+  await Promise.all((plugins || []).map(async (p) => {
+    if (!p || !p.url || p.enabled === false || p.commitHash) return;
+    const targetDir = path.join(reposDir, p.name);
+    if (!fs.existsSync(targetDir)) return;   // never-cloned: updatePlugin does the clone
+    try {
+      const ref = p.branch || "HEAD";
+      const { stdout } = await execAsync(`git ls-remote origin ${ref}`, {
+        cwd: targetDir, timeout: timeoutMs,
+        env: { ...process.env, GCM_INTERACTIVE: "never", GIT_TERMINAL_PROMPT: "0" },
+      });
+      out.set(p.name, String(stdout).trim().split(/\s+/)[0] || "");
+    } catch { /* offline/transient — leave unset, updatePlugin falls back */ }
+  }));
+  return out;
+}
 // @ts-ignore — generated bundle, no .d.ts
 import { loadConfig } from "../lib/core.js";
 
@@ -49,7 +78,8 @@ export function updatePlugin(
   gitUrl: string,
   branch: string | undefined,
   commitHash: string | null,
-  updateInterval = 1
+  updateInterval = 1,
+  remoteHashHint?: string,
 ): { success: boolean; changed: boolean } {
   const reposDir = getReposDir();
   const targetDir = path.join(reposDir, pluginName);
@@ -78,7 +108,12 @@ export function updatePlugin(
       if (!commitHash) {
         try {
           const ref = branch || "HEAD";
-          const remoteHash = execSync(`git ls-remote origin ${ref}`, { cwd: targetDir }).toString().trim().split(/\s+/)[0] || "";
+          // Prefer the hash precomputed in parallel (precomputeRemoteHashes); only
+          // pay for a serial ls-remote here when no hint was supplied (e.g. a plugin
+          // added after the pre-pass).
+          const remoteHash = remoteHashHint !== undefined
+            ? remoteHashHint
+            : (execSync(`git ls-remote origin ${ref}`, { cwd: targetDir }).toString().trim().split(/\s+/)[0] || "");
           const localHash = execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim();
           remoteMoved = !!remoteHash && !!localHash && remoteHash !== localHash;
         } catch { /* offline / transient — fall back to skipping until the interval */ }
@@ -86,25 +121,12 @@ export function updatePlugin(
 
       if (!remoteMoved) {
         writeLog(`Fast-path: ${pluginName} skipping update check (checked ${Math.floor(elapsed / 60_000)} min ago, interval ${updateInterval}h)`);
-        // even when skipping the network check, keep embedded submodules pinned to
-        // this checkout — a loader running against a stale core/core-auth is the
-        // top cause of "looks broken but it's just stale". Rebuild if they moved.
-        if (fs.existsSync(path.join(targetDir, ".gitmodules"))) {
-          // Cheap LOCAL drift check first: `git submodule status` prefixes a line
-          // with '+' when the submodule is off its pinned commit and '-' when it is
-          // uninitialized. Only pay for the expensive recursive sync/update when one
-          // of those is true — otherwise this ran a full submodule update on every
-          // plugin every launch, which was the bulk of the startup delay.
-          let status = "";
-          try { status = execSync("git submodule status --recursive", { cwd: targetDir }).toString(); } catch { /* ignore */ }
-          const drifted = status.split("\n").some((line) => line.startsWith("+") || line.startsWith("-"));
-          if (drifted) {
-            executeGit("git submodule sync --recursive", targetDir);
-            executeGit("git submodule update --init --recursive", targetDir);
-            writeLog(`Fast-path: ${pluginName} submodules were out of sync — resynced, forcing rebuild`);
-            return { success: true, changed: true };
-          }
-        }
+        // NOTE: no per-launch `git submodule status --recursive` here. It spawns a git
+        // subprocess per nested submodule and, under load, cost 10-17s PER PLUGIN —
+        // the dominant startup delay. On the fast path nothing was rebuilt, so pinned
+        // submodules are already correct; the full-update path (interval elapsed or
+        // remote moved) still runs submodule sync + rebuild. A drifted submodule with
+        // no remote change is rare and self-heals on the next real update.
         return { success: true, changed: false };
       }
 

@@ -53,8 +53,13 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   const packageJsonPath = path.join(sourceDir, "package.json");
   let entryFile = "index.js";
   const pluginExecutionFile = path.join(executionPath, `${pluginName}.js`);
+  const deployedExists = fs.existsSync(pluginExecutionFile);
+  // Fast path: nothing changed and the deployed file is already in place. Skips the
+  // build/install AND (below) the copy + plugin re-import + re-activate, which
+  // otherwise cost ~1s+ per plugin on EVERY launch and blocked startup.
+  const nothingToDeploy = !changed && deployedExists;
 
-  if (!changed && fs.existsSync(pluginExecutionFile)) {
+  if (nothingToDeploy) {
     writeLog(`Skipping install/build for ${pluginName} (no changes and deployed file exists)`);
   } else if (fs.existsSync(packageJsonPath)) {
     try {
@@ -93,20 +98,22 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // the build may have produced nothing (e.g. it failed, or the repo was deployed
   // bundle-only with its source stripped) — skip gracefully rather than throwing
   // ENOENT on the copy. Any already-deployed plugin/<name>.js stays in place.
-  if (!fs.existsSync(deploySource)) {
-    writeLog(`Skipping deploy for ${pluginName}: built file not found at ${deploySource}`, true);
-    return fs.existsSync(pluginExecutionFile);
-  }
-
-  if (!fs.existsSync(executionPath)) fs.mkdirSync(executionPath, { recursive: true });
-  await callPluginCleanup(pluginExecutionFile, configDir);
-
-  try {
-    writeLog(`Running copy for ${pluginName}`);
-    fs.copyFileSync(deploySource, pluginExecutionFile);
-    writeLog(`Finished copy for ${pluginName}`);
-  } catch (e: unknown) {
-    writeLog(`Copy failed for ${pluginName}: ${(e as { message: string }).message}`, true);
+  // Only touch the deployed file when something actually changed — the cleanup
+  // imports the old module and the copy rewrites it, both pointless when unchanged.
+  if (!nothingToDeploy) {
+    if (!fs.existsSync(deploySource)) {
+      writeLog(`Skipping deploy for ${pluginName}: built file not found at ${deploySource}`, true);
+      return deployedExists;
+    }
+    if (!fs.existsSync(executionPath)) fs.mkdirSync(executionPath, { recursive: true });
+    await callPluginCleanup(pluginExecutionFile, configDir);
+    try {
+      writeLog(`Running copy for ${pluginName}`);
+      fs.copyFileSync(deploySource, pluginExecutionFile);
+      writeLog(`Finished copy for ${pluginName}`);
+    } catch (e: unknown) {
+      writeLog(`Copy failed for ${pluginName}: ${(e as { message: string }).message}`, true);
+    }
   }
 
   applyClaudeManifest(sourceDir, configDir, pluginName);
@@ -122,7 +129,12 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // earlyLaunch is guarded by PLUGIN_UPDATER_ACTIVATION), so the extra call under
   // opencode's normal launch is harmless.
   const isLoader = pluginName === "opencode-loader" || pluginName === "claude-code-loader";
-  if (getAppName() === "claude" || isLoader) {
+  // Claude: the updater IS the runtime, so it must import + activate() every launch.
+  // OpenCode imports deployed plugins itself, so only loaders need activate() (to
+  // refresh their oc/cc wrapper) and only when something deployed — the unchanged
+  // fast path skips this entirely, which is the bulk of the startup speedup.
+  const needActivate = getAppName() === "claude" ? true : (isLoader && !nothingToDeploy);
+  if (needActivate) {
     try {
       // callPluginCleanup() above imported the OLD file at this path, poisoning
       // Node's ESM cache for it; the copy has since overwritten it with fresh code.
