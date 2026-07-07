@@ -10,7 +10,9 @@ import { startDeclaredDaemon } from "./daemon.js";
 async function callPluginCleanup(pluginExecutionFile: string, configDir: string): Promise<void> {
   if (!fs.existsSync(pluginExecutionFile)) return;
   try {
-    const mod = await import(pluginExecutionFile);
+    // pathToFileURL: on Windows an absolute path like C:\... is not a valid import
+    // specifier ("protocol 'c:'") — the ESM loader needs a file:// URL.
+    const mod = await import(pathToFileURL(pluginExecutionFile).href);
     if (typeof mod.cleanup === "function") {
       writeLog(`Calling cleanup() on ${pluginExecutionFile}`);
       await mod.cleanup(configDir);
