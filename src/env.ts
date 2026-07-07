@@ -18,6 +18,12 @@ export function getAppName(): string {
 
 export function getAppConfigDir(appName: string): string {
   if (earlyLaunchConfigDir) return earlyLaunchConfigDir;
+  // HUB_CONFIG_DIR is the loader's forced config dir (the unified top-priority signal,
+  // matching core/core-auth). The loader's in-process update path spawns us as a child
+  // that inherits it — honor it so single-plugin updates target the loader's real
+  // repos/plugin dir instead of guessing ~/.<app> from argv.
+  const hub = (process.env.HUB_CONFIG_DIR || "").trim();
+  if (hub) return hub;
   const home = os.homedir();
   const directPath = path.join(home, `.${appName}`);
   const configPath = path.join(home, ".config", appName);
