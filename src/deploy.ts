@@ -7,6 +7,12 @@ import { writeLog } from "./log.js";
 import { buildInTempDir } from "./git.js";
 import { startDeclaredDaemon } from "./daemon.js";
 
+// The clone's current commit, used to tie a deployed artifact to the source it was
+// built from (self-heals a stale deploy left by an earlier interrupted pass).
+function repoHead(dir: string): string {
+  try { return execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf8" }).trim(); } catch { return ""; }
+}
+
 async function callPluginCleanup(pluginExecutionFile: string, configDir: string): Promise<void> {
   if (!fs.existsSync(pluginExecutionFile)) return;
   try {
@@ -56,10 +62,22 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   let entryFile = "index.js";
   const pluginExecutionFile = path.join(executionPath, `${pluginName}.js`);
   const deployedExists = fs.existsSync(pluginExecutionFile);
-  // Fast path: nothing changed and the deployed file is already in place. Skips the
-  // build/install AND (below) the copy + plugin re-import + re-activate, which
-  // otherwise cost ~1s+ per plugin on EVERY launch and blocked startup.
-  const nothingToDeploy = !changed && deployedExists;
+  // Self-heal partial/failed prior deploys. `changed` only tracks whether the git
+  // REMOTE moved this pass — but a clone can already sit at the target commit while the
+  // DEPLOYED artifact is stale (an earlier pass advanced the clone but its build/copy
+  // never landed). Without this, the fast-path below skips redeploy FOREVER and
+  // activate() keeps regenerating from stale code. Stamp the deployed commit on every
+  // successful copy and force a redeploy whenever it no longer matches the clone's HEAD.
+  const deployedShaFile = path.join(executionPath, `${pluginName}.sha`);
+  const head = repoHead(sourceDir);
+  let deployedSha = "";
+  try { deployedSha = fs.readFileSync(deployedShaFile, "utf8").trim(); } catch { /* never deployed / pre-sha install */ }
+  const artifactStale = head !== "" && head !== deployedSha;
+  if (artifactStale && deployedExists) writeLog(`Deployed ${pluginName} is stale (HEAD ${head.slice(0, 7)} != deployed ${deployedSha.slice(0, 7) || "none"}) — forcing redeploy`);
+  // Fast path: nothing changed, the deployed file is in place, AND it matches the clone's
+  // HEAD. Skips the build/install AND (below) the copy + plugin re-import + re-activate,
+  // which otherwise cost ~1s+ per plugin on EVERY launch and blocked startup.
+  const nothingToDeploy = !changed && deployedExists && !artifactStale;
 
   if (nothingToDeploy) {
     writeLog(`Skipping install/build for ${pluginName} (no changes and deployed file exists)`);
@@ -112,6 +130,9 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
     try {
       writeLog(`Running copy for ${pluginName}`);
       fs.copyFileSync(deploySource, pluginExecutionFile);
+      // Stamp the commit this artifact was built from AFTER a successful copy, so a
+      // later pass can tell whether the deployed file is current (see artifactStale).
+      try { if (head) fs.writeFileSync(deployedShaFile, head, "utf8"); } catch { /* non-fatal */ }
       writeLog(`Finished copy for ${pluginName}`);
     } catch (e: unknown) {
       writeLog(`Copy failed for ${pluginName}: ${(e as { message: string }).message}`, true);
