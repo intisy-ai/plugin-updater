@@ -108,11 +108,19 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   }
 
   const distPath = path.join(sourceDir, "dist");
+  // pkg.main frequently already carries the dist/ prefix (e.g. "dist/plugin.js"), so
+  // resolve it against sourceDir DIRECTLY — that is the correct artifact. Only fall back
+  // to dist/ when that primary path is missing, and use the BASENAME so we never re-join
+  // "dist/plugin.js" onto dist/ (which double-nests to dist/dist/plugin.js and can pick
+  // up a stale leftover from an older layout — the cause of silent stale deploys).
   let deploySource = path.join(sourceDir, entryFile);
-  if (fs.existsSync(path.join(distPath, entryFile))) {
-    deploySource = path.join(distPath, entryFile);
-  } else if (fs.existsSync(path.join(distPath, "index.js"))) {
-    deploySource = path.join(distPath, "index.js");
+  if (!fs.existsSync(deploySource)) {
+    const base = path.basename(entryFile);
+    if (fs.existsSync(path.join(distPath, base))) {
+      deploySource = path.join(distPath, base);
+    } else if (fs.existsSync(path.join(distPath, "index.js"))) {
+      deploySource = path.join(distPath, "index.js");
+    }
   }
 
   // the build may have produced nothing (e.g. it failed, or the repo was deployed
