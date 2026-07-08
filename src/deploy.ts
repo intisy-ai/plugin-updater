@@ -134,6 +134,13 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
       return deployedExists;
     }
     if (!fs.existsSync(executionPath)) fs.mkdirSync(executionPath, { recursive: true });
+    // Deployed plugin files are esbuild ESM bundles. Without a package.json declaring the
+    // dir ESM, Node re-parses each on import and warns (MODULE_TYPELESS_PACKAGE_JSON).
+    // Drop a one-time marker so imports are clean.
+    try {
+      const pkgMarker = path.join(executionPath, "package.json");
+      if (!fs.existsSync(pkgMarker)) fs.writeFileSync(pkgMarker, JSON.stringify({ type: "module" }, null, 2), "utf8");
+    } catch { /* non-fatal */ }
     await callPluginCleanup(pluginExecutionFile, configDir);
     try {
       writeLog(`Running copy for ${pluginName}`);
