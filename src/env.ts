@@ -26,8 +26,11 @@ export function getAppConfigDir(appName: string): string {
   if (hub) return hub;
   const home = os.homedir();
   const directPath = path.join(home, `.${appName}`);
+  if (appName === "claude") return directPath;
+  // opencode prefers the XDG home whenever it exists (matches the app itself and
+  // sync-bridge); a leftover ~/.opencode must never hijack resolution.
   const configPath = path.join(home, ".config", appName);
-  return fs.existsSync(directPath) ? directPath : configPath;
+  return fs.existsSync(configPath) || !fs.existsSync(directPath) ? configPath : directPath;
 }
 
 export function getReposDir(): string {

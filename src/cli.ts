@@ -52,8 +52,12 @@ function detectApp(explicit?: string): string {
 function getConfigDir(app: string): string {
   const home = os.homedir();
   const directPath = path.join(home, `.${app}`);
+  if (app === "claude") return directPath;
+  // opencode's real home is the XDG dir — prefer it whenever it exists (matches
+  // the app itself and sync-bridge). A leftover ~/.opencode must never hijack
+  // resolution; it's only used when it is the ONLY home present.
   const configPath = path.join(home, ".config", app);
-  return fs.existsSync(directPath) ? directPath : app === "claude" ? directPath : configPath;
+  return fs.existsSync(configPath) || !fs.existsSync(directPath) ? configPath : directPath;
 }
 
 function readJson(file: string): Record<string, unknown> | null {
