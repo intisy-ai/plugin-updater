@@ -136,29 +136,25 @@ function presentApps(): PresentApps {
   return { claude, opencode };
 }
 
-// interactive picker shown when both/neither app is detected and no --app was passed.
-// defaultApp (cwd-inferred) may be null — then there is no default and an empty answer
-// re-asks rather than guessing.
+// A plain one-line prompt (NOT a menu/TUI) shown when both/neither app is detected and no
+// --app was passed: the user just types which app to install for. defaultApp (cwd-inferred)
+// may be null — then an empty answer re-asks rather than guessing. Non-interactive callers
+// never reach this (resolveInitApps hard-errors instead).
 async function promptInitApps(_present: PresentApps, defaultApp: string | null): Promise<string[]> {
   const readline = await import("readline/promises");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
-    console.log([
-      "Initialize plugins for which app?",
-      `  [1] opencode${defaultApp === "opencode" ? "  (default)" : ""}`,
-      `  [2] claude${defaultApp === "claude" ? "  (default)" : ""}`,
-      `  [3] both${defaultApp === "both" ? "  (default)" : ""}`,
-    ].join("\n"));
+    const hint = defaultApp ? `claude/opencode/both, default ${defaultApp}` : "claude/opencode/both";
     for (;;) {
-      const ans = (await rl.question(`> ${defaultApp ? `[${defaultApp}] ` : "1/2/3 "}`)).trim().toLowerCase();
-      if (ans === "1" || ans === "opencode") return ["opencode"];
-      if (ans === "2" || ans === "claude") return ["claude"];
-      if (ans === "3" || ans === "both") return ["opencode", "claude"];
+      const ans = (await rl.question(`Install plugin-updater for which app? (${hint}): `)).trim().toLowerCase();
+      if (ans === "claude" || ans === "c") return ["claude"];
+      if (ans === "opencode" || ans === "o") return ["opencode"];
+      if (ans === "both" || ans === "b") return ["opencode", "claude"];
       if (ans === "") {
         if (defaultApp === "both") return ["opencode", "claude"];
         if (defaultApp) return [defaultApp];
       }
-      // empty with no default, or unrecognized → re-ask
+      console.log('Please type "claude", "opencode", or "both".');
     }
   } finally {
     rl.close();
