@@ -58,3 +58,22 @@ export function getPlugins(configDir: string): Plugin[] {
   }
   return [];
 }
+
+// Persists (or clears) a plugin's pinned commit so a downgrade survives the next
+// earlyLaunch — otherwise the following run's normal pull would undo the pin.
+// Best-effort: never throws.
+export function setPluginCommitHash(configDir: string, name: string, commitHash: string | null): void {
+  const file = getPluginsPath(configDir);
+  try {
+    if (!fs.existsSync(file)) return;
+    const entries = JSON.parse(fs.readFileSync(file, "utf-8")) as Plugin[];
+    if (!Array.isArray(entries)) return;
+    const entry = entries.find((e) => e && e.name === name);
+    if (!entry) return;
+    if (commitHash) entry.commitHash = commitHash;
+    else delete entry.commitHash;
+    fs.writeFileSync(file, JSON.stringify(entries, null, 2), "utf8");
+  } catch (e: unknown) {
+    writeLog(`Failed to persist commitHash for ${name}: ${(e as { message: string }).message}`, true);
+  }
+}

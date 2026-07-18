@@ -171,6 +171,17 @@ export function updatePlugin(
   return { success: true, changed: didChange };
 }
 
+// on-disk local HEAD for the update-status cache; null when never cloned or on any git error
+export function getLocalHead(pluginName: string): string | null {
+  const targetDir = path.join(getReposDir(), pluginName);
+  if (!fs.existsSync(targetDir)) return null;
+  try {
+    return execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 // npm install creates node_modules/.bin symlinks, which fail on filesystems
 // without symlink support (e.g. Windows-backed Docker bind mounts) — build in
 // the OS temp dir and copy the outputs back instead
