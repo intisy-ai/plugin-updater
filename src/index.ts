@@ -165,9 +165,38 @@ export async function updatePluginPublic(
   // interval 0: an explicit update request must never fast-path-skip
   const result = updatePlugin(pluginName, gitUrl, branch, commitHash ?? null, 0);
   if (!result.success) throw new Error(`could not set up ${pluginName} - see the updater log`);
-  // persist the pin so the NEXT earlyLaunch (a normal pull) doesn't undo this downgrade
+  // persist the pin so the NEXT earlyLaunch (a normal pull) doesn't undo this downgrade;
+  // a plain "Update now" (no commitHash) clears any earlier pin so it can move past it
   if (commitHash) setPluginCommitHash(configDir, pluginName, commitHash);
+  else setPluginCommitHash(configDir, pluginName, null);
   await deployToExecutionDir(pluginName, path.join(configDir, "plugin"), result.changed, configDir);
+}
+
+// core-loader's downgrade TUI action calls this SYNCHRONOUSLY and expects a string
+// ("" or "Success" = ok, anything else = an error message shown to the user), so it
+// cannot be async. Checks out the pinned commit and persists it (setPluginCommitHash)
+// so the pin survives the next earlyLaunch; deploy happens on the next restart.
+export function downgrade(
+  plugin: { name: string; url?: string; branch?: string },
+  commitHash: string
+): string {
+  // opencode invokes every plugin export as a hook with a single context object;
+  // our real calls always pass a commitHash string as the 2nd argument
+  if (typeof commitHash !== "string" || !commitHash) return "";
+  if (!plugin || !plugin.name || !plugin.url) return "invalid plugin";
+  writeLog(`Downgrade requested for ${plugin.name} -> ${commitHash}`);
+  try {
+    const configDir = getAppConfigDir(getAppName());
+    // interval 0: a downgrade must never fast-path-skip
+    const result = updatePlugin(plugin.name, plugin.url, plugin.branch, commitHash, 0);
+    if (!result.success) return `could not check out ${commitHash} for ${plugin.name} - see the updater log`;
+    setPluginCommitHash(configDir, plugin.name, commitHash);
+    return "";
+  } catch (e: unknown) {
+    const msg = (e as { message?: string }).message ?? String(e);
+    writeLog(`Failed to downgrade ${plugin.name}: ${msg}`, true);
+    return msg;
+  }
 }
 
 export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise<void | object> {
@@ -204,15 +233,18 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   // updates, and git pull/rebuild for already-cloned plugins). Plugins that
   // have never been cloned still get a full clone+build so a freshly-added
   // plugin is usable immediately even in manual-update mode.
-  if (updateOnLaunch && cfg.self_update !== false) selfUpdate(configDir);
 
   // npm plugins listed in opencode.json. The cache is recorded for every npm plugin
   // regardless of update_on_launch (cheap, best-effort registry lookups) so the
   // loader can show npm update availability even in manual-update mode.
   const { plugins: npmNamesRaw } = readOpencodeJson(configDir);
   const npmNames = npmNamesRaw.map((raw) => raw.replace(/@[^@/]+$/, "") || raw);
+  // snapshot BEFORE selfUpdate runs (this list includes "plugin-updater" itself when
+  // registered in opencode.json) so the before/after diff below can detect a self-update
   const npmVersionsBefore = new Map<string, string | null>();
   for (const name of npmNames) npmVersionsBefore.set(name, resolveNpmPluginVersion(name, configDir) || null);
+
+  if (updateOnLaunch && cfg.self_update !== false) selfUpdate(configDir);
 
   if (updateOnLaunch) {
     for (const name of npmNames) {
@@ -250,9 +282,9 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
 
   // One parallel pass of ls-remote for all plugins up front, so the per-plugin
   // change check below is a local comparison instead of N serial network round-trips.
-  // Not gated on autoUpdate: an autoUpdate:false plugin still needs its remote state
-  // checked for the cache, it just skips the pull/build below.
-  const remoteHashes = updateOnLaunch ? await precomputeRemoteHashes(plugins) : new Map<string, string>();
+  // Not gated on updateOnLaunch/autoUpdate: it's a cheap ls-remote (no pull), so the
+  // cache/badge reflects real remote state even when actual pulls are skipped below.
+  const remoteHashes = await precomputeRemoteHashes(plugins);
 
   for (const plugin of plugins) {
     // absence of the enabled key means enabled, matching the loader TUI
@@ -263,13 +295,15 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
     const alreadyCloned = fs.existsSync(repoDir);
 
     // when update_on_launch is false, skip update+deploy for already-cloned
-    // plugins; only do a full clone+build for plugins not yet on disk
+    // plugins; only do a full clone+build for plugins not yet on disk. The remote
+    // is still checked (above) so the cache's updateAvailable reflects reality.
     if (!updateOnLaunch && alreadyCloned) {
-      writeLog(`Skipping update for ${plugin.name} (update_on_launch disabled, already cloned)`);
+      writeLog(`Skipping update for ${plugin.name} (update_on_launch disabled, already cloned) - checking remote only`);
       const localHead = getLocalHead(plugin.name);
+      const remoteHead = remoteHashes.get(plugin.name) ?? null;
       recordCacheEntry(cache, previousCache, plugin.name, {
-        kind: "git", installedVersion: null, localHead, remoteHead: null,
-        latestVersion: null, updateAvailable: false,
+        kind: "git", installedVersion: null, localHead, remoteHead,
+        latestVersion: null, updateAvailable: gitUpdateAvailable(localHead, remoteHead),
       }, false, checkedAt);
       continue;
     }

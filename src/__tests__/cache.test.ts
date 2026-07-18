@@ -64,6 +64,8 @@ describe("earlyLaunch update-status cache", () => {
     rmSync(originsRoot, { recursive: true, force: true });
   });
 
+  // real git clone/fetch of two repos — the default 5s vitest timeout is too tight
+  // on a slower disk (pre-existing flakiness, unrelated to any code change)
   it("flags a behind clone (autoUpdate:false) as updateAvailable:true and an up-to-date one as false", async () => {
     const reposDir = join(configDir, "repos");
     mkdirSync(reposDir, { recursive: true });
@@ -101,5 +103,5 @@ describe("earlyLaunch update-status cache", () => {
     expect(upToDate.localHead).toBeTruthy();
     expect(upToDate.localHead).toBe(upToDate.remoteHead);
     expect(upToDate.updateAvailable).toBe(false);
-  });
+  }, 20000);
 });
