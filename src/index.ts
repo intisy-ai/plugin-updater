@@ -1,6 +1,6 @@
 import { getAppConfigDir, getAppName, isOpencodeHookInvocation, setEarlyLaunchConfigDir } from "./env.js";
 import { writeLog } from "./log.js";
-import { getPlugins, readOpencodeJson, setPluginCommitHash } from "./config.js";
+import { getPlugins, getPluginsPath, readOpencodeJson, setPluginCommitHash } from "./config.js";
 import { selfUpdate, updateNpmPlugin, resolveNpmPluginVersion, precomputeLatestNpmVersions } from "./npm.js";
 import { updatePlugin, precomputeRemoteHashes, getLocalHead } from "./git.js";
 import { deployToExecutionDir } from "./deploy.js";
@@ -197,6 +197,16 @@ export function downgrade(
     writeLog(`Failed to downgrade ${plugin.name}: ${msg}`, true);
     return msg;
   }
+}
+
+export function uninstallPlugin(configDir: string, name: string): void {
+  const file = getPluginsPath(configDir);
+  const entries = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as Plugin[]) : [];
+  if (!entries.some((e) => e.name === name)) throw new Error(`plugin not found: ${name}`);
+  const remaining = entries.filter((e) => e.name !== name);
+  fs.writeFileSync(file, JSON.stringify(remaining, null, 2), "utf8");
+  writeLog(`Uninstalled plugin ${name}`);
+  pruneOrphans(configDir, remaining);
 }
 
 export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise<void | object> {
