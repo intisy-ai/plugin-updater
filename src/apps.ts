@@ -69,7 +69,3 @@ export function customAppHome(appName: string, env: NodeJS.ProcessEnv = process.
   for (const c of cands) if (existsSync(c)) return c;
   return cands[cands.length - 1] ?? null;
 }
-
-export function registeredAppIds(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir()): string[] {
-  return Object.keys(readRegistered(env, home)).filter((id) => !BUILTIN_IDS.has(id));
-}
