@@ -1,7 +1,8 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { execSync } from "child_process";
+import { execSync, exec } from "child_process";
+import { promisify } from "util";
 import { isOpencodeHookInvocation } from "./env.js";
 import { writeLog } from "./log.js";
 import { readOpencodeJson, writeOpencodeJson } from "./config.js";
@@ -9,11 +10,32 @@ import type { NpmPlugin } from "./types.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { loadConfig } from "../lib/core.js";
 
+const execAsync = promisify(exec);
+
+// deliberately short and separate from npm_timeout_seconds (which governs the
+// much heavier install/update ops) — the cache writer must never let a slow or
+// offline registry delay earlyLaunch
+const NPM_REGISTRY_CHECK_TIMEOUT_MS = 5000;
+
 function getNpmTimeoutMs(): number {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cfg = loadConfig("plugin-updater") as Record<string, any>;
   const seconds = typeof cfg.npm_timeout_seconds === "number" ? cfg.npm_timeout_seconds : 300;
   return seconds * 1000;
+}
+
+// Fetch each npm plugin's registry-latest version CONCURRENTLY, best-effort — for the
+// update-status cache, not for the actual update (that stays `npm update -g`, unchanged).
+export async function precomputeLatestNpmVersions(names: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  await Promise.all(names.map(async (name) => {
+    try {
+      const { stdout } = await execAsync(`npm view ${name} version`, { timeout: NPM_REGISTRY_CHECK_TIMEOUT_MS });
+      const version = String(stdout).trim();
+      if (version) out.set(name, version);
+    } catch { /* offline / unpublished / private registry — leave unset */ }
+  }));
+  return out;
 }
 
 let npmGlobalRoot: string | null = null;

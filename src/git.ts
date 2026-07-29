@@ -36,10 +36,16 @@ export async function precomputeRemoteHashes(
 // @ts-ignore — generated bundle, no .d.ts
 import { loadConfig } from "../lib/core.js";
 
-// dirs copied back from the temp build into the repo clone. core-loader/dist holds
-// the loaders' TUI (tui.js), run as a separate process — without it `oc`/`cc` find
-// no TUI and fall through to plain opencode/claude.
-const BUILD_OUTPUT_DIRS = ["dist", path.join("core", "dist"), path.join("core-loader", "dist")];
+// Deployed clones must carry every dist their bundle references at runtime, since node_modules
+// and untracked submodule builds are not copied back.
+const BUILD_OUTPUT_DIRS = [
+  "dist",
+  path.join("core", "dist"),
+  path.join("core-loader", "dist"),
+  path.join("core-proxy", "dist"),
+  path.join("core-ir", "dist"),
+  path.join("core-proxy", "core-ir", "dist"),
+];
 
 function getGitTimeoutMs(): number {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -169,6 +175,17 @@ export function updatePlugin(
     if (beforeHash !== afterHash) didChange = true;
   }
   return { success: true, changed: didChange };
+}
+
+// on-disk local HEAD for the update-status cache; null when never cloned or on any git error
+export function getLocalHead(pluginName: string): string | null {
+  const targetDir = path.join(getReposDir(), pluginName);
+  if (!fs.existsSync(targetDir)) return null;
+  try {
+    return execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 // npm install creates node_modules/.bin symlinks, which fail on filesystems

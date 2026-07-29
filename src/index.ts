@@ -1,10 +1,11 @@
 import { getAppConfigDir, getAppName, isOpencodeHookInvocation, setEarlyLaunchConfigDir } from "./env.js";
 import { writeLog } from "./log.js";
-import { getPlugins, readOpencodeJson } from "./config.js";
-import { selfUpdate, updateNpmPlugin } from "./npm.js";
-import { updatePlugin, precomputeRemoteHashes } from "./git.js";
+import { getPlugins, getPluginsPath, readOpencodeJson, setPluginCommitHash } from "./config.js";
+import { selfUpdate, updateNpmPlugin, resolveNpmPluginVersion, precomputeLatestNpmVersions } from "./npm.js";
+import { updatePlugin, precomputeRemoteHashes, getLocalHead } from "./git.js";
 import { deployToExecutionDir } from "./deploy.js";
 import { syncPluginsAcrossApps } from "./syncbridge.js";
+import { readUpdateCache, writeUpdateCache, gitUpdateAvailable, npmUpdateAvailable, recordCacheEntry, type UpdateCache } from "./cache.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
@@ -164,7 +165,48 @@ export async function updatePluginPublic(
   // interval 0: an explicit update request must never fast-path-skip
   const result = updatePlugin(pluginName, gitUrl, branch, commitHash ?? null, 0);
   if (!result.success) throw new Error(`could not set up ${pluginName} - see the updater log`);
+  // persist the pin so the NEXT earlyLaunch (a normal pull) doesn't undo this downgrade;
+  // a plain "Update now" (no commitHash) clears any earlier pin so it can move past it
+  if (commitHash) setPluginCommitHash(configDir, pluginName, commitHash);
+  else setPluginCommitHash(configDir, pluginName, null);
   await deployToExecutionDir(pluginName, path.join(configDir, "plugin"), result.changed, configDir);
+}
+
+// core-loader's downgrade TUI action calls this SYNCHRONOUSLY and expects a string
+// ("" or "Success" = ok, anything else = an error message shown to the user), so it
+// cannot be async. Checks out the pinned commit and persists it (setPluginCommitHash)
+// so the pin survives the next earlyLaunch; deploy happens on the next restart.
+export function downgrade(
+  plugin: { name: string; url?: string; branch?: string },
+  commitHash: string
+): string {
+  // opencode invokes every plugin export as a hook with a single context object;
+  // our real calls always pass a commitHash string as the 2nd argument
+  if (typeof commitHash !== "string" || !commitHash) return "";
+  if (!plugin || !plugin.name || !plugin.url) return "invalid plugin";
+  writeLog(`Downgrade requested for ${plugin.name} -> ${commitHash}`);
+  try {
+    const configDir = getAppConfigDir(getAppName());
+    // interval 0: a downgrade must never fast-path-skip
+    const result = updatePlugin(plugin.name, plugin.url, plugin.branch, commitHash, 0);
+    if (!result.success) return `could not check out ${commitHash} for ${plugin.name} - see the updater log`;
+    setPluginCommitHash(configDir, plugin.name, commitHash);
+    return "";
+  } catch (e: unknown) {
+    const msg = (e as { message?: string }).message ?? String(e);
+    writeLog(`Failed to downgrade ${plugin.name}: ${msg}`, true);
+    return msg;
+  }
+}
+
+export function uninstallPlugin(configDir: string, name: string): void {
+  const file = getPluginsPath(configDir);
+  const entries = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as Plugin[]) : [];
+  if (!entries.some((e) => e.name === name)) throw new Error(`plugin not found: ${name}`);
+  const remaining = entries.filter((e) => e.name !== name);
+  fs.writeFileSync(file, JSON.stringify(remaining, null, 2), "utf8");
+  writeLog(`Uninstalled plugin ${name}`);
+  pruneOrphans(configDir, remaining);
 }
 
 export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise<void | object> {
@@ -190,17 +232,32 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
 
   const updateOnLaunch = cfg.update_on_launch !== false;
 
+  // the update-status cache (<configDir>/cache/plugin-updates.json) is the single
+  // source of truth the loader TUI reads to render update state synchronously; it is
+  // assembled across this whole function and written once at the end (best-effort).
+  const checkedAt = new Date().toISOString();
+  const previousCache = readUpdateCache(configDir);
+  const cache: UpdateCache = { checkedAt, plugins: {} };
+
   // update_on_launch:false suppresses remote-update work (selfUpdate, npm
   // updates, and git pull/rebuild for already-cloned plugins). Plugins that
   // have never been cloned still get a full clone+build so a freshly-added
   // plugin is usable immediately even in manual-update mode.
+
+  // npm plugins listed in opencode.json. The cache is recorded for every npm plugin
+  // regardless of update_on_launch (cheap, best-effort registry lookups) so the
+  // loader can show npm update availability even in manual-update mode.
+  const { plugins: npmNamesRaw } = readOpencodeJson(configDir);
+  const npmNames = npmNamesRaw.map((raw) => raw.replace(/@[^@/]+$/, "") || raw);
+  // snapshot BEFORE selfUpdate runs (this list includes "plugin-updater" itself when
+  // registered in opencode.json) so the before/after diff below can detect a self-update
+  const npmVersionsBefore = new Map<string, string | null>();
+  for (const name of npmNames) npmVersionsBefore.set(name, resolveNpmPluginVersion(name, configDir) || null);
+
   if (updateOnLaunch && cfg.self_update !== false) selfUpdate(configDir);
 
-  // npm plugins listed in opencode.json
   if (updateOnLaunch) {
-    const { plugins: npmNames } = readOpencodeJson(configDir);
-    for (const raw of npmNames) {
-      const name = raw.replace(/@[^@/]+$/, "") || raw;
+    for (const name of npmNames) {
       if (name === "plugin-updater") continue; // already self-updated above
       writeLog(`npm earlyLaunch update for ${name}`);
       try {
@@ -211,33 +268,79 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
     }
   }
 
+  const npmLatestVersions = await precomputeLatestNpmVersions(npmNames);
+  for (const name of npmNames) {
+    const installedVersion = resolveNpmPluginVersion(name, configDir) || null;
+    const latestVersion = npmLatestVersions.get(name) ?? null;
+    const before = npmVersionsBefore.get(name) ?? null;
+    const changed = before !== null && installedVersion !== null && before !== installedVersion;
+    recordCacheEntry(cache, previousCache, name, {
+      kind: "npm",
+      installedVersion,
+      localHead: null,
+      remoteHead: null,
+      latestVersion,
+      updateAvailable: npmUpdateAvailable(installedVersion, latestVersion),
+    }, changed, checkedAt);
+  }
+
   if (!plugins || !Array.isArray(plugins)) {
     writeLog("No git plugins provided to earlyLaunch", true);
+    writeUpdateCache(configDir, cache);
     return;
   }
 
   // One parallel pass of ls-remote for all plugins up front, so the per-plugin
   // change check below is a local comparison instead of N serial network round-trips.
-  const remoteHashes = updateOnLaunch ? await precomputeRemoteHashes(plugins) : new Map<string, string>();
+  // Not gated on updateOnLaunch/autoUpdate: it's a cheap ls-remote (no pull), so the
+  // cache/badge reflects real remote state even when actual pulls are skipped below.
+  const remoteHashes = await precomputeRemoteHashes(plugins);
 
   for (const plugin of plugins) {
     // absence of the enabled key means enabled, matching the loader TUI
     if (plugin.enabled === false) { writeLog(`Skipping disabled plugin ${plugin.name}`); continue; }
     if (!plugin.url) { writeLog(`Skipping ${plugin.name}: no url in plugins.json`, true); continue; }
 
-    // when update_on_launch is false, skip update+deploy for already-cloned
-    // plugins; only do a full clone+build for plugins not yet on disk
     const repoDir = path.join(configDir, "repos", plugin.name);
-    if (!updateOnLaunch && fs.existsSync(repoDir)) {
-      writeLog(`Skipping update for ${plugin.name} (update_on_launch disabled, already cloned)`);
+    const alreadyCloned = fs.existsSync(repoDir);
+
+    // when update_on_launch is false, skip update+deploy for already-cloned
+    // plugins; only do a full clone+build for plugins not yet on disk. The remote
+    // is still checked (above) so the cache's updateAvailable reflects reality.
+    if (!updateOnLaunch && alreadyCloned) {
+      writeLog(`Skipping update for ${plugin.name} (update_on_launch disabled, already cloned) - checking remote only`);
+      const localHead = getLocalHead(plugin.name);
+      const remoteHead = remoteHashes.get(plugin.name) ?? null;
+      recordCacheEntry(cache, previousCache, plugin.name, {
+        kind: "git", installedVersion: null, localHead, remoteHead,
+        latestVersion: null, updateAvailable: gitUpdateAvailable(localHead, remoteHead),
+      }, false, checkedAt);
       continue;
     }
 
-    if (plugin.autoUpdate === false && updateOnLaunch) { writeLog(`Skipping auto-update for ${plugin.name} (autoUpdate off)`); continue; }
+    // autoUpdate:false skips only the pull/build, once a clone already exists — a
+    // never-cloned plugin still needs its first install regardless of the flag. The
+    // remote is still checked so the cache's updateAvailable reflects reality.
+    if (plugin.autoUpdate === false && updateOnLaunch && alreadyCloned) {
+      writeLog(`Skipping auto-update for ${plugin.name} (autoUpdate off) - checking remote only`);
+      const localHead = getLocalHead(plugin.name);
+      const remoteHead = remoteHashes.get(plugin.name) ?? null;
+      recordCacheEntry(cache, previousCache, plugin.name, {
+        kind: "git", installedVersion: null, localHead, remoteHead,
+        latestVersion: null, updateAvailable: gitUpdateAvailable(localHead, remoteHead),
+      }, false, checkedAt);
+      continue;
+    }
 
     writeLog(`Processing earlyLaunch for ${plugin.name}`);
     try {
-      const updateResult = updatePlugin(plugin.name, plugin.url, plugin.branch, null, plugin.updateInterval ?? defaultIntervalHours, remoteHashes.get(plugin.name));
+      const updateResult = updatePlugin(plugin.name, plugin.url, plugin.branch, plugin.commitHash ?? null, plugin.updateInterval ?? defaultIntervalHours, remoteHashes.get(plugin.name));
+      const localHead = getLocalHead(plugin.name);
+      const remoteHead = remoteHashes.get(plugin.name) ?? null;
+      recordCacheEntry(cache, previousCache, plugin.name, {
+        kind: "git", installedVersion: null, localHead, remoteHead,
+        latestVersion: null, updateAvailable: gitUpdateAvailable(localHead, remoteHead),
+      }, updateResult.changed, checkedAt);
       if (!updateResult.success) {
         writeLog(`Skipping deploy for ${plugin.name}: update failed`, true);
         continue;
@@ -247,6 +350,8 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
       writeLog(`Failed to process ${plugin.name}: ${(e as { message: string }).message}`, true);
     }
   }
+
+  writeUpdateCache(configDir, cache);
 
   if (plugins.length > 0) pruneOrphans(configDir, plugins);
 }
