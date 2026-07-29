@@ -39,3 +39,37 @@ export async function syncPluginsAcrossApps(configDir: string): Promise<void> {
     writeLog(`Cross-app plugin sync failed: ${(e as { message: string }).message}`, true);
   }
 }
+
+// Drive the broadened cross-app sync (accounts + plugins + settings + per-plugin
+// configs). Falls back to plugins-only sync when sync-bridge is an older version.
+export async function syncAllAcrossApps(configDir: string): Promise<void> {
+  const libPath = resolveSyncBridgeLib(configDir);
+  if (!libPath) {
+    writeLog("sync-bridge not installed; skipping cross-app sync");
+    return;
+  }
+  try {
+    const bridge = (await import(pathToFileURL(libPath).href)) as { syncAll?: () => unknown };
+    if (typeof bridge.syncAll !== "function") {
+      writeLog("sync-bridge has no syncAll (older version); falling back to plugin sync", true);
+      await syncPluginsAcrossApps(configDir);
+      return;
+    }
+    const result = bridge.syncAll();
+    writeLog(`Cross-app sync: ${JSON.stringify(result)}`);
+  } catch (e: unknown) {
+    writeLog(`Cross-app sync failed: ${(e as { message: string }).message}`, true);
+  }
+}
+
+// Read sync-bridge's coverage/status, or null when sync-bridge is absent or old.
+export async function readSyncStatus(configDir: string): Promise<unknown | null> {
+  const libPath = resolveSyncBridgeLib(configDir);
+  if (!libPath) return null;
+  try {
+    const bridge = (await import(pathToFileURL(libPath).href)) as { syncStatus?: () => unknown };
+    return typeof bridge.syncStatus === "function" ? bridge.syncStatus() : null;
+  } catch {
+    return null;
+  }
+}

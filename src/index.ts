@@ -4,7 +4,7 @@ import { getPlugins, getPluginsPath, readOpencodeJson, setPluginCommitHash } fro
 import { selfUpdate, updateNpmPlugin, resolveNpmPluginVersion, precomputeLatestNpmVersions } from "./npm.js";
 import { updatePlugin, precomputeRemoteHashes, getLocalHead } from "./git.js";
 import { deployToExecutionDir } from "./deploy.js";
-import { syncPluginsAcrossApps } from "./syncbridge.js";
+import { syncAllAcrossApps } from "./syncbridge.js";
 import { readUpdateCache, writeUpdateCache, gitUpdateAvailable, npmUpdateAvailable, recordCacheEntry, type UpdateCache } from "./cache.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
@@ -225,9 +225,10 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   // config file materialized (so it's discoverable in the home / agentbox data folder)
   try { deployUpdaterCommands(); } catch { /* best-effort */ }
 
-  // pull in any `sync: true` plugins from the other app BEFORE building, then
-  // re-read the list so a freshly-synced-in plugin is cloned/built this pass.
-  await syncPluginsAcrossApps(configDir);
+  // reconcile cross-app state (accounts, settings, configs, plugin list) BEFORE
+  // building, then re-read the list so a freshly-synced-in plugin is cloned/built
+  // this pass. Falls back to plugins-only sync on an older sync-bridge.
+  await syncAllAcrossApps(configDir);
   plugins = getPlugins(configDir);
 
   const updateOnLaunch = cfg.update_on_launch !== false;
