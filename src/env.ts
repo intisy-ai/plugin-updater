@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { customAppHome } from "./apps.js";
 
 // set by earlyLaunch/direct-update so all path resolution targets that dir
 let earlyLaunchConfigDir: string | null = null;
@@ -12,7 +13,7 @@ export function setEarlyLaunchConfigDir(dir: string): void {
 // the CLI runs without "claude" in argv, so it forces the app via env
 export function getAppName(): string {
   const override = process.env.PLUGIN_UPDATER_APP;
-  if (override === "claude" || override === "opencode") return override;
+  if (override && override.trim()) return override.trim();
   return process.argv.join(" ").includes("claude") ? "claude" : "opencode";
 }
 
@@ -24,6 +25,8 @@ export function getAppConfigDir(appName: string): string {
   // repos/plugin dir instead of guessing ~/.<app> from argv.
   const hub = (process.env.HUB_CONFIG_DIR || "").trim();
   if (hub) return hub;
+  const custom = customAppHome(appName);
+  if (custom) return custom;
   const home = os.homedir();
   const directPath = path.join(home, `.${appName}`);
   if (appName === "claude") return directPath;
