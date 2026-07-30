@@ -103,5 +103,11 @@ describe("earlyLaunch update-status cache", () => {
     expect(upToDate.localHead).toBeTruthy();
     expect(upToDate.localHead).toBe(upToDate.remoteHead);
     expect(upToDate.updateAvailable).toBe(false);
+
+    // earlyLaunch announces the plugin it processes on the event bus.
+    const { drain } = await import("../../core/src/index.js");
+    const events: { topic: string; payload: { name?: string } }[] = [];
+    drain("cache-test", (e: typeof events[number]) => events.push(e));
+    expect(events.some((e) => e.topic === "plugin.progress" && e.payload.name === "uptodate-plugin")).toBe(true);
   }, 20000);
 });
