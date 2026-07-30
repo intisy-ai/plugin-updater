@@ -9,7 +9,7 @@ import { readUpdateCache, writeUpdateCache, gitUpdateAvailable, npmUpdateAvailab
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { defineConfig, loadConfig, defineReadme, maybeRunReadmeCli } from "../lib/core.js";
+import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli } from "../lib/core.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
@@ -26,6 +26,19 @@ defineConfig("plugin-updater", {
   daemon_health_timeout_ms: 1500,
   self_update: true,
   update_on_launch: true,
+});
+
+defineCapabilities("plugin-updater", {
+  fields: [
+    { key: "logging", type: "boolean", label: "Logging", group: "General" },
+    { key: "self_update", type: "boolean", label: "Self-update", description: "Keep plugin-updater itself current.", group: "Updates" },
+    { key: "update_on_launch", type: "boolean", label: "Update on launch", group: "Updates" },
+    { key: "default_update_interval_hours", type: "number", label: "Update interval (h)", min: 0, group: "Updates" },
+    { key: "git_timeout_seconds", type: "number", label: "Git timeout (s)", min: 1, group: "Timeouts" },
+    { key: "npm_timeout_seconds", type: "number", label: "npm timeout (s)", min: 1, group: "Timeouts" },
+    { key: "build_timeout_seconds", type: "number", label: "Build timeout (s)", min: 1, group: "Timeouts" },
+    { key: "daemon_health_timeout_ms", type: "number", label: "Daemon health timeout (ms)", min: 0, group: "Timeouts" },
+  ],
 });
 
 defineReadme({
