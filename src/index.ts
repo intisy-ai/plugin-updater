@@ -1,4 +1,4 @@
-import { getAppConfigDir, getAppName, isOpencodeHookInvocation, setEarlyLaunchConfigDir } from "./env.js";
+import { getAppConfigDir, getAppName, getReposDir, isOpencodeHookInvocation, setEarlyLaunchConfigDir } from "./env.js";
 import { writeLog } from "./log.js";
 import { getPlugins, getPluginsPath, readOpencodeJson, setPluginCommitHash } from "./config.js";
 import { selfUpdate, updateNpmPlugin, resolveNpmPluginVersion, precomputeLatestNpmVersions } from "./npm.js";
@@ -9,7 +9,7 @@ import { readUpdateCache, writeUpdateCache, gitUpdateAvailable, npmUpdateAvailab
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, publish, TOPICS } from "../lib/core.js";
+import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, publish, TOPICS, registerApp } from "../lib/core.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
@@ -172,6 +172,29 @@ function emitInstalled(name: string, version: string | null): void {
   publish(TOPICS.pluginInstalled, { name, version: version || "" }, "plugin-updater");
 }
 
+// A loader's clone carries its app descriptor in cairn.json (`app` block). Register
+// it into the shared app registry so a dashboard discovers apps from the loaders
+// installed here, with no hardcoded app list. Best-effort: a plugin without an
+// `app` block (any non-loader) registers nothing.
+export function registerAppFromClone(name: string, reposDir: string = getReposDir()): void {
+  try {
+    const manifestPath = path.join(reposDir, name, "cairn.json");
+    if (!fs.existsSync(manifestPath)) return;
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { app?: unknown };
+    const app = manifest.app;
+    if (app && typeof app === "object" && !Array.isArray(app)) registerApp(app);
+  } catch {
+    // no manifest or malformed on disk: register nothing
+  }
+}
+
+// Called whenever a plugin finishes installing or updating: announce it and keep
+// the app registry in sync with the loaders on disk.
+function onInstalled(name: string, version: string | null): void {
+  emitInstalled(name, version);
+  registerAppFromClone(name);
+}
+
 export async function updatePluginPublic(
   pluginName: string,
   gitUrl: string,
@@ -189,7 +212,7 @@ export async function updatePluginPublic(
   if (commitHash) setPluginCommitHash(configDir, pluginName, commitHash);
   else setPluginCommitHash(configDir, pluginName, null);
   await deployToExecutionDir(pluginName, path.join(configDir, "plugin"), result.changed, configDir);
-  emitInstalled(pluginName, getLocalHead(pluginName));
+  onInstalled(pluginName, getLocalHead(pluginName));
 }
 
 // core-loader's downgrade TUI action calls this SYNCHRONOUSLY and expects a string
@@ -295,7 +318,7 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
     const latestVersion = npmLatestVersions.get(name) ?? null;
     const before = npmVersionsBefore.get(name) ?? null;
     const changed = before !== null && installedVersion !== null && before !== installedVersion;
-    if (changed) emitInstalled(name, installedVersion);
+    if (changed) onInstalled(name, installedVersion);
     recordCacheEntry(cache, previousCache, name, {
       kind: "npm",
       installedVersion,
@@ -369,7 +392,7 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
         continue;
       }
       await deployToExecutionDir(plugin.name, path.join(configDir, "plugin"), updateResult.changed, configDir);
-      if (updateResult.changed) emitInstalled(plugin.name, localHead);
+      if (updateResult.changed) onInstalled(plugin.name, localHead);
     } catch (e: unknown) {
       writeLog(`Failed to process ${plugin.name}: ${(e as { message: string }).message}`, true);
     }
