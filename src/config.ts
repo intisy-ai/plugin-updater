@@ -59,6 +59,43 @@ export function getPlugins(configDir: string): Plugin[] {
   return [];
 }
 
+// Adds a plugin to plugins.json, or refreshes the url of an existing entry
+// (preserving its enabled/autoUpdate/commitHash). The single writer consumers
+// use to register a freshly cloned plugin, so the format lives in one place.
+export function registerPlugin(configDir: string, name: string, url: string, autoUpdate = true): void {
+  const file = getPluginsPath(configDir);
+  if (!file) return;
+  const entries: Plugin[] = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as Plugin[]) : [];
+  const entry = entries.find((e) => e && e.name === name);
+  if (entry) entry.url = url;
+  else entries.push({ name, url, enabled: true, autoUpdate });
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(entries, null, 2), "utf8");
+  writeLog(`Registered plugin ${name}`);
+}
+
+// Flips a single field on a plugins.json entry. Returns false when the file or
+// the entry is absent so a caller can surface a not-found error.
+function setPluginField(configDir: string, name: string, mutate: (entry: Plugin) => void): boolean {
+  const file = getPluginsPath(configDir);
+  if (!file || !fs.existsSync(file)) return false;
+  const entries = JSON.parse(fs.readFileSync(file, "utf-8")) as Plugin[];
+  if (!Array.isArray(entries)) return false;
+  const entry = entries.find((e) => e && e.name === name);
+  if (!entry) return false;
+  mutate(entry);
+  fs.writeFileSync(file, JSON.stringify(entries, null, 2), "utf8");
+  return true;
+}
+
+export function setPluginEnabled(configDir: string, name: string, enabled: boolean): boolean {
+  return setPluginField(configDir, name, (entry) => { entry.enabled = enabled; });
+}
+
+export function setPluginAutoUpdate(configDir: string, name: string, autoUpdate: boolean): boolean {
+  return setPluginField(configDir, name, (entry) => { entry.autoUpdate = autoUpdate; });
+}
+
 // Persists (or clears) a plugin's pinned commit so a downgrade survives the next
 // earlyLaunch — otherwise the following run's normal pull would undo the pin.
 // Best-effort: never throws.
