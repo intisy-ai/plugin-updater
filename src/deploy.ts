@@ -18,7 +18,7 @@ function repoHead(dir: string): string {
 // than the shared app registry — the registry only gains this entry AFTER deploy
 // completes (registerAppFromClone runs post-deploy), so on a loader's first-ever
 // install the registry wouldn't have it yet.
-function isLoaderPlugin(sourceDir: string, pluginName: string): boolean {
+export function isLoaderPlugin(sourceDir: string, pluginName: string): boolean {
   try {
     const manifest = JSON.parse(fs.readFileSync(path.join(sourceDir, "cairn.json"), "utf8")) as {
       app?: { loader?: { id?: string } };
