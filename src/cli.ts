@@ -6,6 +6,9 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { resolveOpencodeConfigPath, insertPluginIntoJsonc, resolveInitApps, cwdApp, type PresentApps } from "./init.js";
+import { getAppConfigDir } from "./env.js";
+// @ts-ignore — generated bundle, no .d.ts
+import { getApps } from "../lib/core.js";
 
 interface ParsedArgs {
   command: string;
@@ -36,9 +39,16 @@ function binaryExists(name: string): boolean {
   }
 }
 
+// An explicit --app is accepted for the two built-ins OR any app registered in the
+// shared app registry (not just claude/opencode) — getConfigDir below then resolves
+// it through that same registry.
 function detectApp(explicit?: string): string {
   if (explicit === "claude" || explicit === "opencode") return explicit;
-  if (explicit) throw new Error(`Unknown app "${explicit}" - use claude or opencode`);
+  if (explicit) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((getApps() as Array<{ id: string }>).some((a) => a.id === explicit)) return explicit;
+    throw new Error(`Unknown app "${explicit}" - use claude, opencode, or a registered app id`);
+  }
   const hasClaudeDir = fs.existsSync(path.join(os.homedir(), ".claude"));
   const hasOpencodeDir = fs.existsSync(path.join(os.homedir(), ".opencode"))
     || fs.existsSync(path.join(os.homedir(), ".config", "opencode"));
@@ -49,15 +59,11 @@ function detectApp(explicit?: string): string {
   throw new Error("Both apps (or neither) found - pass --app claude or --app opencode");
 }
 
+// Delegates to env.ts's getAppConfigDir, which resolves through the shared app
+// registry first (any custom app, once registered) before falling back to the
+// two built-in layouts — avoiding a second hardcoded copy of that resolution here.
 function getConfigDir(app: string): string {
-  const home = os.homedir();
-  const directPath = path.join(home, `.${app}`);
-  if (app === "claude") return directPath;
-  // opencode's real home is the XDG dir — prefer it whenever it exists (matches
-  // the app itself and sync-bridge). A leftover ~/.opencode must never hijack
-  // resolution; it's only used when it is the ONLY home present.
-  const configPath = path.join(home, ".config", app);
-  return fs.existsSync(configPath) || !fs.existsSync(directPath) ? configPath : directPath;
+  return getAppConfigDir(app);
 }
 
 function readJson(file: string): Record<string, unknown> | null {
