@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { execSync } from "child_process";
-// @ts-ignore — generated bundle, no .d.ts
+// @ts-ignore: generated bundle, no .d.ts
 import { readActivity } from "../../lib/core.js";
 
 function git(cmd: string, cwd: string): string {

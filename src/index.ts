@@ -9,10 +9,11 @@ import { readUpdateCache, writeUpdateCache, gitUpdateAvailable, npmUpdateAvailab
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, publish, emitEvent, TOPICS, registerApp } from "../lib/core.js";
+import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, publish, TOPICS, registerApp } from "../lib/core.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
+import { emitPluginInstalled, emitPluginUpdated, emitPluginUpdateAvailable, emitPluginUpdateFailed, type ActivityTrigger } from "./pluginActivity.js";
 
 // `node dist/index.js config …` (from the /plugin-updater-config command) runs the
 // config CLI and exits, before the self-activation/updater sequence below.
@@ -165,54 +166,6 @@ function pruneOrphans(configDir: string, plugins: Plugin[]): void {
 // re-exported public API (consumers import these from "plugin-updater")
 export { getNpmPlugins, installNpmPlugin, uninstallNpmPlugin, updateNpmPlugin } from "./npm.js";
 export { getPlugins, getPluginsPath } from "./config.js";
-
-// Announce a plugin's install/update/failure on the event bus so a dashboard can
-// observe plugin management without polling. Best-effort (emitEvent never throws).
-type ActivityTrigger = "launch" | "manual";
-
-function pluginSubject(name: string): { kind: "plugin"; id: string; label: string } {
-  return { kind: "plugin", id: name, label: name };
-}
-
-function emitPluginInstalled(name: string, version: string | null, trigger: ActivityTrigger): void {
-  emitEvent({
-    topic: TOPICS.pluginInstalled,
-    action: "installed",
-    impact: "notice",
-    subject: pluginSubject(name),
-    details: { version: version || "", trigger },
-  }, "plugin-updater");
-}
-
-function emitPluginUpdated(name: string, fromVersion: string | null, toVersion: string | null, trigger: ActivityTrigger): void {
-  emitEvent({
-    topic: TOPICS.pluginInstalled,
-    action: "updated",
-    impact: "notice",
-    subject: pluginSubject(name),
-    details: { fromVersion, toVersion: toVersion || "", trigger },
-  }, "plugin-updater");
-}
-
-function emitPluginUpdateAvailable(name: string, fromVersion: string | null, toVersion: string | null): void {
-  emitEvent({
-    topic: TOPICS.pluginInstalled,
-    action: "update_available",
-    impact: "info",
-    subject: pluginSubject(name),
-    details: { fromVersion, toVersion },
-  }, "plugin-updater");
-}
-
-function emitPluginUpdateFailed(name: string, err: unknown): void {
-  emitEvent({
-    topic: TOPICS.pluginInstalled,
-    action: "update_failed",
-    impact: "error",
-    subject: pluginSubject(name),
-    details: { message: String((err as { message?: string })?.message ?? err) },
-  }, "plugin-updater");
-}
 
 // A loader's clone carries its app descriptor in cairn.json (`app` block). Register
 // it into the shared app registry so a dashboard discovers apps from the loaders
