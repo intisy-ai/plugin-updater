@@ -3,6 +3,34 @@ import path from "path";
 import { isOpencodeHookInvocation } from "./env.js";
 import { writeLog } from "./log.js";
 import type { Plugin } from "./types.js";
+// @ts-ignore — generated bundle, no .d.ts
+import { getApps } from "../lib/core.js";
+
+// Which registered app a config dir belongs to, matched by the app id appearing as a
+// path segment (e.g. ".claude" -> "claude", ".config/opencode" -> "opencode"). Returns
+// null when no registered app matches (nothing registered yet, or an unrecognized dir).
+function appIdForConfigDir(configDir: string): string | null {
+  const segments = configDir.replace(/\\/g, "/").toLowerCase().split("/").map((s) => s.replace(/^\./, ""));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const hit = (getApps() as Array<{ id: string }>).find((a) => segments.includes(a.id.toLowerCase()));
+  return hit ? hit.id : null;
+}
+
+// The OTHER apps' loader plugin names, so a config dir never shows/manages a foreign
+// app's loader (e.g. a mixed-container init without --app). Data-driven via the shared
+// app registry once apps are registered (see registerAppFromClone).
+function foreignLoaderNames(configDir: string): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const apps = getApps() as Array<{ id: string; loader?: { id: string } }>;
+  if (apps.length === 0) {
+    // Bootstrap fallback: nothing is registered yet (no loader has ever installed on
+    // this machine), so fall back to the two known built-in loaders directly.
+    const isClaude = configDir.replace(/\\/g, "/").includes("/.claude");
+    return [isClaude ? "opencode-loader" : "claude-code-loader"];
+  }
+  const currentApp = appIdForConfigDir(configDir);
+  return apps.filter((a) => a.loader && a.id !== currentApp).map((a) => a.loader!.id);
+}
 
 // opencode reads either opencode.json or opencode.jsonc; resolve the one that
 // actually exists (prefer .json) so npm-plugin detection and edits hit the real file.
@@ -47,11 +75,8 @@ export function getPlugins(configDir: string): Plugin[] {
     if (fs.existsSync(file)) {
       const entries = JSON.parse(fs.readFileSync(file, "utf-8")) as Plugin[];
       if (!Array.isArray(entries)) return [];
-      // Each loader is app-specific; never manage or show the OTHER app's loader even
-      // if it was mistakenly registered here (e.g. a mixed-container init without --app).
-      const isClaude = configDir.replace(/\\/g, "/").includes("/.claude");
-      const foreignLoader = isClaude ? "opencode-loader" : "claude-code-loader";
-      return entries.filter((e) => e && e.name !== foreignLoader);
+      const foreign = foreignLoaderNames(configDir);
+      return entries.filter((e) => e && !foreign.includes(e.name));
     }
   } catch (e: unknown) {
     writeLog(`Failed to parse ${file}: ${(e as { message: string }).message}`, true);

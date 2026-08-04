@@ -13,6 +13,22 @@ function repoHead(dir: string): string {
   try { return execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf8" }).trim(); } catch { return ""; }
 }
 
+// A loader plugin self-describes as one via cairn.json's `app.loader.id` (see
+// registerAppFromClone in index.ts), so this reads the clone's OWN manifest rather
+// than the shared app registry — the registry only gains this entry AFTER deploy
+// completes (registerAppFromClone runs post-deploy), so on a loader's first-ever
+// install the registry wouldn't have it yet.
+export function isLoaderPlugin(sourceDir: string, pluginName: string): boolean {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(sourceDir, "cairn.json"), "utf8")) as {
+      app?: { loader?: { id?: string } };
+    };
+    return manifest.app?.loader?.id === pluginName;
+  } catch {
+    return false;
+  }
+}
+
 async function callPluginCleanup(pluginExecutionFile: string, configDir: string): Promise<void> {
   if (!fs.existsSync(pluginExecutionFile)) return;
   try {
@@ -166,7 +182,7 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // until the next app restart. activate() is idempotent (installs the wrapper,
   // earlyLaunch is guarded by PLUGIN_UPDATER_ACTIVATION), so the extra call under
   // opencode's normal launch is harmless.
-  const isLoader = pluginName === "opencode-loader" || pluginName === "claude-code-loader";
+  const isLoader = isLoaderPlugin(sourceDir, pluginName);
   // Claude: the updater IS the runtime, so it must import + activate() every launch.
   // OpenCode imports deployed plugins itself, so only loaders need activate() (to
   // refresh their oc/cc wrapper) and only when something deployed — the unchanged

@@ -4,7 +4,14 @@ import { getAppName } from "./env.js";
 import { writeLog } from "./log.js";
 import type { DaemonManifest } from "./types.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { loadConfig } from "../lib/core.js";
+import { loadConfig, getAppDescriptor } from "../lib/core.js";
+
+// The registry's human label for the running app (e.g. "Claude Code", "OpenCode"),
+// falling back to the raw app id when it isn't registered yet.
+function appLabel(): string {
+  const appName = getAppName();
+  return (getAppDescriptor(appName)?.label as string | undefined) ?? appName;
+}
 
 async function isDaemonHealthy(url: string): Promise<boolean> {
   try {
@@ -51,7 +58,7 @@ export async function startDeclaredDaemon(sourceDir: string, configDir: string, 
       env: {
         ...process.env,
         HUB_CONFIG_DIR: configDir,
-        HUB_APP_NAME: getAppName() === "claude" ? "Claude Code" : "OpenCode",
+        HUB_APP_NAME: appLabel(),
         ...(daemon.port ? { HUB_PROXY_PORT: String(daemon.port) } : {}),
       },
     });
