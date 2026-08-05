@@ -9,6 +9,7 @@ import { execSync } from "child_process";
 // @ts-ignore: generated bundle, no .d.ts
 import { readActivity } from "../../lib/core.js";
 import { getPlugins, getPluginsPath } from "../config.js";
+import { setEarlyLaunchConfigDir } from "../env.js";
 
 function git(cmd: string, cwd: string): string {
   return execSync(cmd, { cwd }).toString().trim();
@@ -54,6 +55,9 @@ describe("plugin-updater install/update/failure activity", () => {
     mkdirSync(join(configDir, "config"), { recursive: true });
     writeFileSync(join(configDir, "config", "plugin-updater.json"), JSON.stringify({ self_update: false }), "utf8");
     mkdirSync(join(configDir, "repos"), { recursive: true });
+    // the early-launch dir is module state that outlives one test, so each test points
+    // it at its own home the way a fresh process would
+    setEarlyLaunchConfigDir(configDir);
   });
 
   afterEach(() => {
@@ -178,6 +182,32 @@ describe("plugin-updater install/update/failure activity", () => {
     expect(rec.impact).toBe("notice");
     expect(rec.outcome).toBe("ok");
     expect(rec.subject.id).toBe("gone-demo");
+    // an uninstall says what it removed, not just that something happened
+    expect(rec.details.kind).toBe("git");
+    expect(rec.details.url).toContain("whatever");
+    expect(rec.text).toContain("gone-demo");
+  });
+
+it("records an uninstall in the home it was performed on, even when the process points elsewhere", async () => {
+    const otherHome = mkdtempSync(join(tmpdir(), "pu-activity-elsewhere-"));
+    try {
+      mkdirSync(join(otherHome, "config"), { recursive: true });
+      writeFileSync(getPluginsPath(otherHome), JSON.stringify([
+        { name: "away-demo", url: join(originsRoot, "away"), enabled: true },
+      ]), "utf8");
+
+      // the process home stays configDir while the work targets otherHome, which is what
+      // a dashboard does when it manages another app's home in-process
+      const { uninstallPlugin } = await import("../index.js");
+      uninstallPlugin(otherHome, "away-demo");
+
+      const here = readActivity([configDir], { topics: ["plugin.installed"] }).records;
+      const there = readActivity([otherHome], { topics: ["plugin.installed"] }).records;
+      expect(there.map((r: { action: string }) => r.action)).toContain("uninstalled");
+      expect(here.map((r: { action: string }) => r.action)).not.toContain("uninstalled");
+    } finally {
+      rmSync(otherHome, { recursive: true, force: true });
+    }
   });
 
   it("reports a downgrade with the commit it pinned", async () => {

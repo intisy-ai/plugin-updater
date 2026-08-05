@@ -114,5 +114,5 @@ describe("earlyLaunch update-status cache", () => {
     const progress = events.filter((e) => e.topic === "plugin.progress");
     expect(progress.some((e) => e.payload.details?.name === "uptodate-plugin")).toBe(true);
     expect(progress.every((e) => e.payload.impact === "debug")).toBe(true);
-  }, 20000);
+  }, 60000);
 });

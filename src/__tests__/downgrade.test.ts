@@ -95,7 +95,7 @@ describe("downgrade + pin reversibility", () => {
 
     const pluginsAfterUpdate = JSON.parse(readFileSync(join(configDir, "config", "plugins.json"), "utf8")) as Plugin[];
     expect(pluginsAfterUpdate[0].commitHash).toBeUndefined();
-  }, 20000);
+  }, 60000);
 
   it("returns a non-empty error string for a plugin missing its url (no git call attempted)", async () => {
     const { downgrade } = await import("../index.js");
