@@ -9,7 +9,7 @@ import { readUpdateCache, writeUpdateCache, gitUpdateAvailable, npmUpdateAvailab
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, publish, TOPICS, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "../lib/core.js";
+import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "../lib/core.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
@@ -21,6 +21,7 @@ import {
   emitPluginActivated,
   emitPluginUninstalled,
   emitPluginDowngraded,
+  emitPluginProgress,
   type ActivityTrigger,
 } from "./pluginActivity.js";
 
@@ -430,7 +431,7 @@ async function earlyLaunchInScope(configDir: string, plugins: Plugin[]): Promise
     }
 
     writeLog(`Processing earlyLaunch for ${plugin.name}`);
-    publish(TOPICS.pluginProgress, { name: plugin.name, phase: alreadyCloned ? "updating" : "installing" }, "plugin-updater");
+    emitPluginProgress(plugin.name, alreadyCloned ? "updating" : "installing");
     const previousVersion = alreadyCloned ? getLocalHead(plugin.name) : null;
     try {
       const updateResult = updatePlugin(plugin.name, plugin.url, plugin.branch, plugin.commitHash ?? null, plugin.updateInterval ?? defaultIntervalHours, remoteHashes.get(plugin.name));

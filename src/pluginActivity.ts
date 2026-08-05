@@ -89,3 +89,16 @@ export function emitPluginDowngraded(name: string, hash: string): void {
     details: { hash },
   }, "plugin-updater");
 }
+
+// Work in flight, not a fact worth keeping: recorded at debug so it stays out of a
+// reader's way unless the home's floor is deliberately lowered. Nothing consumes it.
+export function emitPluginProgress(name: string, phase: string): void {
+  emitEvent({
+    topic: TOPICS.pluginProgress,
+    action: phase,
+    impact: "debug",
+    actor: "app",
+    subject: pluginSubject(name),
+    details: { name, phase },
+  }, "plugin-updater");
+}

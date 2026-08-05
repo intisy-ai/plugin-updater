@@ -53,6 +53,9 @@ describe("earlyLaunch update-status cache", () => {
 
     mkdirSync(join(configDir, "config"), { recursive: true });
     writeFileSync(join(configDir, "config", "plugin-updater.json"), JSON.stringify({ self_update: false }), "utf8");
+    // progress is recorded at debug, so this home asks to see debug (the floor is read
+    // per home at first use, hence written before earlyLaunch runs)
+    writeFileSync(join(configDir, "config", "settings.json"), JSON.stringify({ activityMinImpact: "debug" }), "utf8");
   });
 
   afterEach(() => {
@@ -104,10 +107,12 @@ describe("earlyLaunch update-status cache", () => {
     expect(upToDate.localHead).toBe(upToDate.remoteHead);
     expect(upToDate.updateAvailable).toBe(false);
 
-    // earlyLaunch announces the plugin it processes on the event bus.
+    // earlyLaunch announces the plugin it processes on the event bus, at debug level.
     const { drain } = await import("../../core/src/index.js");
-    const events: { topic: string; payload: { name?: string } }[] = [];
+    const events: { topic: string; payload: { details?: { name?: string }; impact?: string } }[] = [];
     drain("cache-test", (e: typeof events[number]) => events.push(e));
-    expect(events.some((e) => e.topic === "plugin.progress" && e.payload.name === "uptodate-plugin")).toBe(true);
+    const progress = events.filter((e) => e.topic === "plugin.progress");
+    expect(progress.some((e) => e.payload.details?.name === "uptodate-plugin")).toBe(true);
+    expect(progress.every((e) => e.payload.impact === "debug")).toBe(true);
   }, 20000);
 });
