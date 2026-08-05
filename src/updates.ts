@@ -17,10 +17,23 @@ import {
 } from "./cache.js";
 import { emitUpdatesAvailable, emitPluginUpdated, emitPluginInstalled, emitPluginUpdateFailed, emitPluginProgress } from "./pluginActivity.js";
 import { deployToExecutionDir } from "./deploy.js";
-// @ts-ignore: generated bundle, no .d.ts
-import { loadConfig } from "../lib/core.js";
 import { shouldPull, triggerEnabled, type Trigger } from "./policy.js";
 import type { Plugin } from "./types.js";
+
+// Policy must reflect what is on disk NOW. core's loadConfig caches per home for the
+// life of the process (including the absence of a file, which is what a plugin sees when
+// it loads before a home is configured), so a mode changed by a dashboard or by hand
+// would otherwise not apply until every process restarted.
+function readUpdaterConfig(configDir: string): Record<string, unknown> {
+  for (const file of [path.join(configDir, "config", "plugin-updater.json"), path.join(configDir, "plugin-updater.json")]) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+    } catch { /* an unreadable config means defaults, never a crash */ }
+  }
+  return {};
+}
 
 export interface CheckResult {
   checkedAt: string;
@@ -135,7 +148,7 @@ function emptyOutcome(checkedAt: string): UpdateOutcome {
 // The one pull path. `only` means a human asked for it, so policy does not apply; without
 // it every candidate is filtered through the home's mode and the plugin's own flag.
 async function pullCandidates(configDir: string, check: CheckResult, opts: PullOptions): Promise<UpdateOutcome> {
-  const cfg = loadConfig("plugin-updater") as Record<string, unknown>;
+  const cfg = readUpdaterConfig(configDir);
   const defaultIntervalHours = typeof cfg.default_update_interval_hours === "number" ? cfg.default_update_interval_hours : 1;
   const list = (opts.plugins ?? getPlugins(configDir)).filter(enabled);
   const byHuman = Array.isArray(opts.only);
@@ -192,7 +205,7 @@ async function pullCandidates(configDir: string, check: CheckResult, opts: PullO
 
 // Startup path: a check always runs for an enabled trigger, and only the pull is gated.
 export async function runAutoUpdate(configDir: string, opts: PullOptions & { trigger: Trigger }): Promise<UpdateOutcome> {
-  const cfg = loadConfig("plugin-updater") as Record<string, unknown>;
+  const cfg = readUpdaterConfig(configDir);
   if (!triggerEnabled(cfg, opts.trigger)) {
     writeLog(`Skipping update run: the ${opts.trigger} trigger is off in ${configDir}`);
     return emptyOutcome(new Date().toISOString());

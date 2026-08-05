@@ -155,6 +155,25 @@ describe("runAutoUpdate", () => {
     expect(progress.every((e) => e.payload.impact === "debug")).toBe(true);
   }, 60000);
 
+  // The bug this pins: policy used to come from core's loadConfig, which caches per home
+  // for the life of the process INCLUDING the absence of a file. A plugin that loads
+  // before its home is configured then kept "no config" (which reads as update) forever,
+  // so a home set to check would still be pulled. Policy is read from disk per run now.
+  it("honours a mode written after something already read this home's config", async () => {
+    const { firstHash } = seedBehindClone("late-config");
+    // poison the cache exactly as a module-load defineConfig does, before any config exists
+    const core = await import("../../core/src/index.js");
+    core.loadConfig("plugin-updater", configDir);
+
+    writeConfig({ auto_update_mode: "check" });
+
+    const { runAutoUpdate } = await import("../updates.js");
+    const outcome = await runAutoUpdate(configDir, { trigger: "loader" });
+
+    expect(outcome.updated).toEqual([]);
+    expect(head("late-config")).toBe(firstHash);
+  }, 60000);
+
   it("updates on an enabled trigger in a home that updates", async () => {
     const { secondHash } = seedBehindClone("plain");
     writeConfig({ auto_update_mode: "update" });
