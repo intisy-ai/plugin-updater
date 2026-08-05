@@ -252,7 +252,7 @@ export function downgrade(
     const result = updatePlugin(plugin.name, plugin.url, plugin.branch, commitHash, 0);
     if (!result.success) return `could not check out ${commitHash} for ${plugin.name} - see the updater log`;
     setPluginCommitHash(configDir, plugin.name, commitHash);
-    try { emitPluginDowngraded(plugin.name, commitHash); } catch { /* never fail a completed downgrade */ }
+    try { emitPluginDowngraded(plugin.name, commitHash, configDir); } catch { /* never fail a completed downgrade */ }
     return "";
   } catch (e: unknown) {
     const msg = (e as { message?: string }).message ?? String(e);
@@ -264,11 +264,21 @@ export function downgrade(
 export function uninstallPlugin(configDir: string, name: string): void {
   const file = getPluginsPath(configDir);
   const entries = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as Plugin[]) : [];
-  if (!entries.some((e) => e.name === name)) throw new Error(`plugin not found: ${name}`);
+  const entry = entries.find((e) => e.name === name);
+  if (!entry) throw new Error(`plugin not found: ${name}`);
   const remaining = entries.filter((e) => e.name !== name);
+  // read the version before pruning removes the clone it comes from
+  const removedVersion = getLocalHead(name) || "";
   fs.writeFileSync(file, JSON.stringify(remaining, null, 2), "utf8");
   writeLog(`Uninstalled plugin ${name}`);
-  try { emitPluginUninstalled(name); } catch { /* never fail a completed uninstall */ }
+  try {
+    emitPluginUninstalled(name, {
+      kind: "git",
+      version: removedVersion,
+      url: entry.url || "",
+      message: `Uninstalled ${name}${removedVersion ? " (" + removedVersion.slice(0, 8) + ")" : ""}`,
+    }, configDir);
+  } catch { /* never fail a completed uninstall */ }
   pruneOrphans(configDir, remaining);
 }
 
