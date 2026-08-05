@@ -9,11 +9,24 @@ import { readUpdateCache, writeUpdateCache, gitUpdateAvailable, npmUpdateAvailab
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, publish, TOPICS, registerApp } from "../lib/core.js";
+import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, publish, TOPICS, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "../lib/core.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
-import { emitPluginInstalled, emitPluginUpdated, emitPluginUpdateAvailable, emitPluginUpdateFailed, type ActivityTrigger } from "./pluginActivity.js";
+import {
+  emitPluginInstalled,
+  emitPluginUpdated,
+  emitPluginUpdateAvailable,
+  emitPluginUpdateFailed,
+  emitPluginActivated,
+  emitPluginUninstalled,
+  emitPluginDowngraded,
+  type ActivityTrigger,
+} from "./pluginActivity.js";
+
+// This bundle's core instance is only ever used by this plugin, so naming the entry
+// once here is accurate for every event it emits, including the ones outside a run.
+setActivityContext({ entry: "updater" });
 
 // `node dist/index.js config …` (from the /plugin-updater-config command) runs the
 // config CLI and exits, before the self-activation/updater sequence below.
@@ -238,6 +251,7 @@ export function downgrade(
     const result = updatePlugin(plugin.name, plugin.url, plugin.branch, commitHash, 0);
     if (!result.success) return `could not check out ${commitHash} for ${plugin.name} - see the updater log`;
     setPluginCommitHash(configDir, plugin.name, commitHash);
+    try { emitPluginDowngraded(plugin.name, commitHash); } catch { /* never fail a completed downgrade */ }
     return "";
   } catch (e: unknown) {
     const msg = (e as { message?: string }).message ?? String(e);
@@ -253,11 +267,26 @@ export function uninstallPlugin(configDir: string, name: string): void {
   const remaining = entries.filter((e) => e.name !== name);
   fs.writeFileSync(file, JSON.stringify(remaining, null, 2), "utf8");
   writeLog(`Uninstalled plugin ${name}`);
+  try { emitPluginUninstalled(name); } catch { /* never fail a completed uninstall */ }
   pruneOrphans(configDir, remaining);
 }
 
 export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise<void | object> {
   if (isOpencodeHookInvocation(configDir)) return {};
+  // A caller can run this for several homes in one process (a dashboard iterating
+  // over the installed apps), so the home is stated for the duration of the run and
+  // restored afterwards: a sticky home would send a later run's records here.
+  const outerContext = getActivityContext();
+  setActivityContext({ home: configDir });
+  try {
+    return await withCause({ kind: "startup", surface: "launch" }, () => earlyLaunchInScope(configDir, plugins));
+  } finally {
+    resetActivityContext();
+    setActivityContext(outerContext);
+  }
+}
+
+async function earlyLaunchInScope(configDir: string, plugins: Plugin[]): Promise<void> {
   setEarlyLaunchConfigDir(configDir);
   writeLog("Starting earlyLaunch updater sequence");
 
@@ -277,6 +306,14 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   // this pass. Falls back to plugins-only sync on an older sync-bridge.
   await syncAllAcrossApps(configDir);
   plugins = getPlugins(configDir);
+
+  // One activation per plugin this home actually loads, so a plugin that emits
+  // nothing of its own is still visible from the moment the app starts. Absence of
+  // the enabled key means enabled, matching the loader TUI and the loop below.
+  for (const plugin of plugins) {
+    if (plugin.enabled === false) continue;
+    try { emitPluginActivated(plugin.name, { kind: "git" }); } catch { /* never block launch */ }
+  }
 
   const updateOnLaunch = cfg.update_on_launch !== false;
 
@@ -319,6 +356,10 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
 
   const npmLatestVersions = await precomputeLatestNpmVersions(npmNames);
   for (const name of npmNames) {
+    // plugin-updater is the thing doing the reporting, not one of the plugins it loads
+    if (name !== "plugin-updater") {
+      try { emitPluginActivated(name, { kind: "npm" }); } catch { /* never block launch */ }
+    }
     const installedVersion = resolveNpmPluginVersion(name, configDir) || null;
     const latestVersion = npmLatestVersions.get(name) ?? null;
     const before = npmVersionsBefore.get(name) ?? null;
