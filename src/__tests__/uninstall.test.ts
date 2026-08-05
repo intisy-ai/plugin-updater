@@ -5,10 +5,19 @@ import { join } from "node:path";
 import { uninstallPlugin } from "../index.js";
 import { getPluginsPath } from "../config.js";
 
+const ENV_KEYS = ["HUB_CONFIG_DIR", "HUB_OPENCODE_DIR", "CORE_APP"];
+
 let configDir: string;
+const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
   configDir = mkdtempSync(join(tmpdir(), "updater-uninstall-"));
+  // uninstalling reports itself on the activity bus, which lands in the ambient
+  // home unless the test owns that home too
+  for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
+  process.env.HUB_CONFIG_DIR = configDir;
+  process.env.HUB_OPENCODE_DIR = configDir;
+  process.env.CORE_APP = "opencode";
   mkdirSync(join(configDir, "config"), { recursive: true });
   mkdirSync(join(configDir, "repos", "plugin-a"), { recursive: true });
   mkdirSync(join(configDir, "repos", "plugin-b"), { recursive: true });
@@ -24,7 +33,13 @@ beforeEach(() => {
   );
 });
 
-afterEach(() => rmSync(configDir, { recursive: true, force: true }));
+afterEach(() => {
+  for (const key of ENV_KEYS) {
+    if (savedEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = savedEnv[key];
+  }
+  rmSync(configDir, { recursive: true, force: true });
+});
 
 describe("uninstallPlugin", () => {
   it("removes the entry and prunes the clone and deployed bundle, leaving others intact", () => {

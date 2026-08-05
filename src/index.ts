@@ -9,10 +9,25 @@ import { readUpdateCache, writeUpdateCache, gitUpdateAvailable, npmUpdateAvailab
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, publish, TOPICS, registerApp } from "../lib/core.js";
+import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "../lib/core.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
+import {
+  emitPluginInstalled,
+  emitPluginUpdated,
+  emitPluginUpdateAvailable,
+  emitPluginUpdateFailed,
+  emitPluginActivated,
+  emitPluginUninstalled,
+  emitPluginDowngraded,
+  emitPluginProgress,
+  type ActivityTrigger,
+} from "./pluginActivity.js";
+
+// This bundle's core instance is only ever used by this plugin, so naming the entry
+// once here is accurate for every event it emits, including the ones outside a run.
+setActivityContext({ entry: "updater" });
 
 // `node dist/index.js config …` (from the /plugin-updater-config command) runs the
 // config CLI and exits, before the self-activation/updater sequence below.
@@ -166,12 +181,6 @@ function pruneOrphans(configDir: string, plugins: Plugin[]): void {
 export { getNpmPlugins, installNpmPlugin, uninstallNpmPlugin, updateNpmPlugin } from "./npm.js";
 export { getPlugins, getPluginsPath } from "./config.js";
 
-// Announce a plugin's install/update on the event bus so a dashboard can observe
-// plugin management without polling. Best-effort (the bus never throws).
-function emitInstalled(name: string, version: string | null): void {
-  publish(TOPICS.pluginInstalled, { name, version: version || "" }, "plugin-updater");
-}
-
 // A loader's clone carries its app descriptor in cairn.json (`app` block). Register
 // it into the shared app registry so a dashboard discovers apps from the loaders
 // installed here, with no hardcoded app list. Best-effort: a plugin without an
@@ -188,10 +197,12 @@ export function registerAppFromClone(name: string, reposDir: string = getReposDi
   }
 }
 
-// Called whenever a plugin finishes installing or updating: announce it and keep
-// the app registry in sync with the loaders on disk.
-function onInstalled(name: string, version: string | null): void {
-  emitInstalled(name, version);
+// Called whenever a plugin finishes installing or updating: announce it (as
+// "installed" on a plugin's first clone, "updated" when a previous version
+// existed) and keep the app registry in sync with the loaders on disk.
+function onInstalled(name: string, version: string | null, previousVersion: string | null, trigger: ActivityTrigger): void {
+  if (previousVersion !== null) emitPluginUpdated(name, previousVersion, version, trigger);
+  else emitPluginInstalled(name, version, trigger);
   registerAppFromClone(name);
 }
 
@@ -204,15 +215,22 @@ export async function updatePluginPublic(
   if (isOpencodeHookInvocation(pluginName)) return {};
   writeLog(`Public API update call for ${pluginName}`);
   const configDir = getAppConfigDir(getAppName());
+  const repoDir = path.join(configDir, "repos", pluginName);
+  const previousVersion = fs.existsSync(repoDir) ? getLocalHead(pluginName) : null;
   // interval 0: an explicit update request must never fast-path-skip
   const result = updatePlugin(pluginName, gitUrl, branch, commitHash ?? null, 0);
-  if (!result.success) throw new Error(`could not set up ${pluginName} - see the updater log`);
+  if (!result.success) {
+    const err = new Error(`could not set up ${pluginName} - see the updater log`);
+    emitPluginUpdateFailed(pluginName, err);
+    throw err;
+  }
   // persist the pin so the NEXT earlyLaunch (a normal pull) doesn't undo this downgrade;
   // a plain "Update now" (no commitHash) clears any earlier pin so it can move past it
   if (commitHash) setPluginCommitHash(configDir, pluginName, commitHash);
   else setPluginCommitHash(configDir, pluginName, null);
   await deployToExecutionDir(pluginName, path.join(configDir, "plugin"), result.changed, configDir);
-  onInstalled(pluginName, getLocalHead(pluginName));
+  if (result.changed) onInstalled(pluginName, getLocalHead(pluginName), previousVersion, "manual");
+  else registerAppFromClone(pluginName);
 }
 
 // core-loader's downgrade TUI action calls this SYNCHRONOUSLY and expects a string
@@ -234,6 +252,7 @@ export function downgrade(
     const result = updatePlugin(plugin.name, plugin.url, plugin.branch, commitHash, 0);
     if (!result.success) return `could not check out ${commitHash} for ${plugin.name} - see the updater log`;
     setPluginCommitHash(configDir, plugin.name, commitHash);
+    try { emitPluginDowngraded(plugin.name, commitHash); } catch { /* never fail a completed downgrade */ }
     return "";
   } catch (e: unknown) {
     const msg = (e as { message?: string }).message ?? String(e);
@@ -249,11 +268,26 @@ export function uninstallPlugin(configDir: string, name: string): void {
   const remaining = entries.filter((e) => e.name !== name);
   fs.writeFileSync(file, JSON.stringify(remaining, null, 2), "utf8");
   writeLog(`Uninstalled plugin ${name}`);
+  try { emitPluginUninstalled(name); } catch { /* never fail a completed uninstall */ }
   pruneOrphans(configDir, remaining);
 }
 
 export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise<void | object> {
   if (isOpencodeHookInvocation(configDir)) return {};
+  // A caller can run this for several homes in one process (a dashboard iterating
+  // over the installed apps), so the home is stated for the duration of the run and
+  // restored afterwards: a sticky home would send a later run's records here.
+  const outerContext = getActivityContext();
+  setActivityContext({ home: configDir });
+  try {
+    return await withCause({ kind: "startup", surface: "launch" }, () => earlyLaunchInScope(configDir, plugins));
+  } finally {
+    resetActivityContext();
+    setActivityContext(outerContext);
+  }
+}
+
+async function earlyLaunchInScope(configDir: string, plugins: Plugin[]): Promise<void> {
   setEarlyLaunchConfigDir(configDir);
   writeLog("Starting earlyLaunch updater sequence");
 
@@ -273,6 +307,14 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   // this pass. Falls back to plugins-only sync on an older sync-bridge.
   await syncAllAcrossApps(configDir);
   plugins = getPlugins(configDir);
+
+  // One activation per plugin this home actually loads, so a plugin that emits
+  // nothing of its own is still visible from the moment the app starts. Absence of
+  // the enabled key means enabled, matching the loader TUI and the loop below.
+  for (const plugin of plugins) {
+    if (plugin.enabled === false) continue;
+    try { emitPluginActivated(plugin.name, { kind: "git" }); } catch { /* never block launch */ }
+  }
 
   const updateOnLaunch = cfg.update_on_launch !== false;
 
@@ -308,24 +350,31 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
         updateNpmPlugin(name, configDir);
       } catch (e: unknown) {
         writeLog(`Failed npm update for ${name}: ${(e as { message: string }).message}`, true);
+        emitPluginUpdateFailed(name, e);
       }
     }
   }
 
   const npmLatestVersions = await precomputeLatestNpmVersions(npmNames);
   for (const name of npmNames) {
+    // plugin-updater is the thing doing the reporting, not one of the plugins it loads
+    if (name !== "plugin-updater") {
+      try { emitPluginActivated(name, { kind: "npm" }); } catch { /* never block launch */ }
+    }
     const installedVersion = resolveNpmPluginVersion(name, configDir) || null;
     const latestVersion = npmLatestVersions.get(name) ?? null;
     const before = npmVersionsBefore.get(name) ?? null;
     const changed = before !== null && installedVersion !== null && before !== installedVersion;
-    if (changed) onInstalled(name, installedVersion);
+    const updateAvailable = npmUpdateAvailable(installedVersion, latestVersion);
+    if (changed) onInstalled(name, installedVersion, before, "launch");
+    else if (updateAvailable) emitPluginUpdateAvailable(name, installedVersion, latestVersion);
     recordCacheEntry(cache, previousCache, name, {
       kind: "npm",
       installedVersion,
       localHead: null,
       remoteHead: null,
       latestVersion,
-      updateAvailable: npmUpdateAvailable(installedVersion, latestVersion),
+      updateAvailable,
     }, changed, checkedAt);
   }
 
@@ -356,9 +405,11 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
       writeLog(`Skipping update for ${plugin.name} (update_on_launch disabled, already cloned) - checking remote only`);
       const localHead = getLocalHead(plugin.name);
       const remoteHead = remoteHashes.get(plugin.name) ?? null;
+      const updateAvailable = gitUpdateAvailable(localHead, remoteHead);
+      if (updateAvailable) emitPluginUpdateAvailable(plugin.name, localHead, remoteHead);
       recordCacheEntry(cache, previousCache, plugin.name, {
         kind: "git", installedVersion: null, localHead, remoteHead,
-        latestVersion: null, updateAvailable: gitUpdateAvailable(localHead, remoteHead),
+        latestVersion: null, updateAvailable,
       }, false, checkedAt);
       continue;
     }
@@ -370,15 +421,18 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
       writeLog(`Skipping auto-update for ${plugin.name} (autoUpdate off) - checking remote only`);
       const localHead = getLocalHead(plugin.name);
       const remoteHead = remoteHashes.get(plugin.name) ?? null;
+      const updateAvailable = gitUpdateAvailable(localHead, remoteHead);
+      if (updateAvailable) emitPluginUpdateAvailable(plugin.name, localHead, remoteHead);
       recordCacheEntry(cache, previousCache, plugin.name, {
         kind: "git", installedVersion: null, localHead, remoteHead,
-        latestVersion: null, updateAvailable: gitUpdateAvailable(localHead, remoteHead),
+        latestVersion: null, updateAvailable,
       }, false, checkedAt);
       continue;
     }
 
     writeLog(`Processing earlyLaunch for ${plugin.name}`);
-    publish(TOPICS.pluginProgress, { name: plugin.name, phase: alreadyCloned ? "updating" : "installing" }, "plugin-updater");
+    emitPluginProgress(plugin.name, alreadyCloned ? "updating" : "installing");
+    const previousVersion = alreadyCloned ? getLocalHead(plugin.name) : null;
     try {
       const updateResult = updatePlugin(plugin.name, plugin.url, plugin.branch, plugin.commitHash ?? null, plugin.updateInterval ?? defaultIntervalHours, remoteHashes.get(plugin.name));
       const localHead = getLocalHead(plugin.name);
@@ -389,12 +443,14 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
       }, updateResult.changed, checkedAt);
       if (!updateResult.success) {
         writeLog(`Skipping deploy for ${plugin.name}: update failed`, true);
+        emitPluginUpdateFailed(plugin.name, new Error(`update failed for ${plugin.name} - see the updater log`));
         continue;
       }
       await deployToExecutionDir(plugin.name, path.join(configDir, "plugin"), updateResult.changed, configDir);
-      if (updateResult.changed) onInstalled(plugin.name, localHead);
+      if (updateResult.changed) onInstalled(plugin.name, localHead, previousVersion, "launch");
     } catch (e: unknown) {
       writeLog(`Failed to process ${plugin.name}: ${(e as { message: string }).message}`, true);
+      emitPluginUpdateFailed(plugin.name, e);
     }
   }
 
