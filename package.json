@@ -4,6 +4,7 @@
   "description": "Plugin lifecycle manager for OpenCode and Claude Code launchers",
   "type": "module",
   "main": "dist/index.js",
+  "pluginEntry": "dist/plugin.js",
   "bin": {
     "plugin-updater": "dist/cli.js"
   },
@@ -30,7 +31,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "npx esbuild core/src/index.ts --bundle --platform=node --format=esm --outfile=lib/core.js && tsc",
+    "build": "npx esbuild core/src/index.ts --bundle --platform=node --format=esm --outfile=lib/core.js && tsc && node build.mjs",
     "postbuild": "node dist/index.js readme",
     "test": "npm run build && vitest run",
     "prepublishOnly": "npm run build"

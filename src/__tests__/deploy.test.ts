@@ -4,10 +4,11 @@
 // (registerAppFromClone only populates the registry AFTER deploy completes), so this
 // locks in that manifest-reading behavior directly.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { isLoaderPlugin } from "../deploy.js";
+import { execFileSync } from "child_process";
+import { isLoaderPlugin, deployEntryFile } from "../deploy.js";
 
 describe("isLoaderPlugin", () => {
   let sourceDir: string;
@@ -71,4 +72,45 @@ describe("isLoaderPlugin", () => {
     writeFileSync(join(sourceDir, "cairn.json"), "{ not valid json");
     expect(isLoaderPlugin(sourceDir, "claude-code-loader")).toBe(false);
   });
+});
+
+// A plugin is deployed as ONE file, so a repo whose npm entry is a multi-file tsc dist has
+// to name a self-contained bundle for deployment; otherwise the deployed file imports
+// siblings that were never copied and cannot even be loaded.
+describe("deployEntryFile", () => {
+  it("prefers the declared plugin entry over the npm main", () => {
+    expect(deployEntryFile({ main: "dist/index.js", pluginEntry: "dist/plugin.js" })).toBe("dist/plugin.js");
+  });
+
+  it("falls back to the npm main when no plugin entry is declared", () => {
+    expect(deployEntryFile({ main: "dist/bundle.js" })).toBe("dist/bundle.js");
+  });
+
+  it("falls back to index.js when the manifest names neither", () => {
+    expect(deployEntryFile({})).toBe("index.js");
+  });
+
+  it("ignores a non-string plugin entry rather than deploying nonsense", () => {
+    expect(deployEntryFile({ main: "dist/index.js", pluginEntry: 42 as never })).toBe("dist/index.js");
+  });
+});
+
+describe("the deployed artifact", () => {
+  it("answers config schema after being copied out on its own", () => {
+    const isolated = mkdtempSync(join(tmpdir(), "pu-artifact-"));
+    try {
+      const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { pluginEntry?: string };
+      const artifact = join(process.cwd(), pkg.pluginEntry ?? "dist/index.js");
+      const copied = join(isolated, "plugin-updater.js");
+      writeFileSync(join(isolated, "package.json"), JSON.stringify({ type: "module" }), "utf8");
+      copyFileSync(artifact, copied);
+
+      const out = execFileSync(process.execPath, [copied, "config", "schema"], { encoding: "utf8" });
+      const schema = JSON.parse(out.trim()) as { name: string; fields?: unknown[] };
+      expect(schema.name).toBe("plugin-updater");
+      expect(Array.isArray(schema.fields)).toBe(true);
+    } finally {
+      rmSync(isolated, { recursive: true, force: true });
+    }
+  }, 30000);
 });

@@ -110,7 +110,13 @@ Config file: `<configDir>/config/plugin-updater.json` (edit via the loader or `/
   "build_timeout_seconds": 300,
   "daemon_health_timeout_ms": 1500,
   "self_update": true,
-  "update_on_launch": true
+  "update_on_launch": true,
+  "auto_update_mode": "update",
+  "auto_update_triggers": {
+    "loader": true,
+    "app": true,
+    "cairn": true
+  }
 }
 ```
 
@@ -124,6 +130,8 @@ Config file: `<configDir>/config/plugin-updater.json` (edit via the loader or `/
 | `daemon_health_timeout_ms` | `1500` |
 | `self_update` | `true` |
 | `update_on_launch` | `true` |
+| `auto_update_mode` | `"update"` |
+| `auto_update_triggers` | `{"loader":true,"app":true,"cairn":true}` |
 
 ## Commands
 

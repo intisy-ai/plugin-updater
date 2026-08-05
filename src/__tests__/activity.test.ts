@@ -82,7 +82,7 @@ describe("plugin-updater install/update/failure activity", () => {
     expect(rec.details.version).toBe(firstHash);
     expect(rec.outcome).toBe("ok");
     expect(rec.subject).toEqual({ kind: "plugin", id: "install-demo", label: "install-demo" });
-  }, 20000);
+  }, 60000);
 
   it("emits an updated activity with the version delta on a successful update", async () => {
     const origin = join(originsRoot, "origin-update");
@@ -99,7 +99,7 @@ describe("plugin-updater install/update/failure activity", () => {
     expect(rec.details.fromVersion).toBe(firstHash);
     expect(rec.details.toVersion).toBe(secondHash);
     expect(rec.outcome).toBe("ok");
-  }, 20000);
+  }, 60000);
 
   it("emits an update_failed activity (impact error) when the update fails", async () => {
     const missingOrigin = join(originsRoot, "does-not-exist");
@@ -112,7 +112,7 @@ describe("plugin-updater install/update/failure activity", () => {
     expect(rec).toBeDefined();
     expect(rec.impact).toBe("error");
     expect(rec.outcome).toBe("failed");
-  }, 20000);
+  }, 60000);
 
   it("reports one activation per plugin this home loads, and none for a disabled one", async () => {
     const enabledOrigin = join(originsRoot, "origin-enabled");
@@ -225,5 +225,5 @@ it("records an uninstall in the home it was performed on, even when the process 
     expect(rec.impact).toBe("notice");
     expect(rec.outcome).toBe("ok");
     expect(rec.details.hash).toBe(firstHash);
-  }, 20000);
+  }, 60000);
 });

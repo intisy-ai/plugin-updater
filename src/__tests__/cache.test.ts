@@ -107,12 +107,14 @@ describe("earlyLaunch update-status cache", () => {
     expect(upToDate.localHead).toBe(upToDate.remoteHead);
     expect(upToDate.updateAvailable).toBe(false);
 
-    // earlyLaunch announces the plugin it processes on the event bus, at debug level.
+    // Progress means "working on this". Neither plugin here is worked on: one is already
+    // current and the other opted out of automatic updates, yet both still get accurate
+    // cache entries above, which is what this test is about. Progress for a plugin that
+    // IS pulled is covered in runAutoUpdate.test.ts.
     const { drain } = await import("../../core/src/index.js");
     const events: { topic: string; payload: { details?: { name?: string }; impact?: string } }[] = [];
     drain("cache-test", (e: typeof events[number]) => events.push(e));
     const progress = events.filter((e) => e.topic === "plugin.progress");
-    expect(progress.some((e) => e.payload.details?.name === "uptodate-plugin")).toBe(true);
-    expect(progress.every((e) => e.payload.impact === "debug")).toBe(true);
+    expect(progress, "nothing was worked on, so nothing reported progress").toEqual([]);
   }, 60000);
 });

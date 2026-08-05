@@ -29,6 +29,16 @@ export function isLoaderPlugin(sourceDir: string, pluginName: string): boolean {
   }
 }
 
+// A plugin is deployed as ONE file next to its siblings-free execution dir, so a repo whose
+// npm entry is a multi-file tsc dist declares a self-contained bundle as `pluginEntry`.
+// Without that the deployed file imports modules that were never copied, and anything that
+// loads it (an app hook, the `config schema` probe behind every settings screen) fails.
+export function deployEntryFile(pkg: { main?: string; pluginEntry?: string }): string {
+  if (typeof pkg.pluginEntry === "string" && pkg.pluginEntry) return pkg.pluginEntry;
+  if (typeof pkg.main === "string" && pkg.main) return pkg.main;
+  return "index.js";
+}
+
 async function callPluginCleanup(pluginExecutionFile: string, configDir: string): Promise<void> {
   if (!fs.existsSync(pluginExecutionFile)) return;
   try {
@@ -118,8 +128,7 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
 
   if (fs.existsSync(packageJsonPath)) {
     try {
-      const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as { main?: string };
-      if (pkg.main) entryFile = pkg.main;
+      entryFile = deployEntryFile(JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as { main?: string; pluginEntry?: string });
     } catch { /* ignore */ }
   }
 

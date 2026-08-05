@@ -120,3 +120,15 @@ export function emitPluginProgress(name: string, phase: string): void {
     details: { name, phase },
   });
 }
+
+// A check is worth seeing even when nothing was installed: it is how a reader learns
+// there is something to do.
+export function emitUpdatesAvailable(count: number, names: string[], home?: string): void {
+  emit({
+    topic: TOPICS.pluginInstalled,
+    action: "updates_available",
+    impact: "info",
+    outcome: "ok",
+    details: { count, names, message: `${count} plugin update${count === 1 ? "" : "s"} available` },
+  }, home);
+}

@@ -1,15 +1,19 @@
 import { getAppConfigDir, getAppName, getReposDir, isOpencodeHookInvocation, setEarlyLaunchConfigDir } from "./env.js";
 import { writeLog } from "./log.js";
 import { getPlugins, getPluginsPath, readOpencodeJson, setPluginCommitHash } from "./config.js";
-import { selfUpdate, updateNpmPlugin, resolveNpmPluginVersion, precomputeLatestNpmVersions } from "./npm.js";
-import { updatePlugin, precomputeRemoteHashes, getLocalHead } from "./git.js";
+import { selfUpdate, updateNpmPlugin, resolveNpmPluginVersion } from "./npm.js";
+import { updatePlugin, getLocalHead } from "./git.js";
 import { deployToExecutionDir } from "./deploy.js";
 import { syncAllAcrossApps } from "./syncbridge.js";
-import { readUpdateCache, writeUpdateCache, gitUpdateAvailable, npmUpdateAvailable, recordCacheEntry, type UpdateCache } from "./cache.js";
+import { checkUpdates, runAutoUpdate, updateOne as updateOneInHome, updateAll as updateAllInHome } from "./updates.js";
+import { resolveMode, type Trigger } from "./policy.js";
+// Importing this registers the config defaults and the capability schema, which must
+// happen before the CLI guard below so `config schema` answers.
+import { updaterSchema } from "./schema.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "../lib/core.js";
+import { loadConfig, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "../lib/core.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
@@ -28,33 +32,6 @@ import {
 // This bundle's core instance is only ever used by this plugin, so naming the entry
 // once here is accurate for every event it emits, including the ones outside a run.
 setActivityContext({ entry: "updater" });
-
-// `node dist/index.js config …` (from the /plugin-updater-config command) runs the
-// config CLI and exits, before the self-activation/updater sequence below.
-// Register config defaults BEFORE the CLI guard so `config schema` sees them (no write).
-defineConfig("plugin-updater", {
-  logging: true,
-  default_update_interval_hours: 1,
-  git_timeout_seconds: 120,
-  npm_timeout_seconds: 300,
-  build_timeout_seconds: 300,
-  daemon_health_timeout_ms: 1500,
-  self_update: true,
-  update_on_launch: true,
-});
-
-defineCapabilities("plugin-updater", {
-  fields: [
-    { key: "logging", type: "boolean", label: "Logging", group: "General" },
-    { key: "self_update", type: "boolean", label: "Self-update", description: "Keep plugin-updater itself current.", group: "Updates" },
-    { key: "update_on_launch", type: "boolean", label: "Update on launch", group: "Updates" },
-    { key: "default_update_interval_hours", type: "number", label: "Update interval (h)", min: 0, group: "Updates" },
-    { key: "git_timeout_seconds", type: "number", label: "Git timeout (s)", min: 1, group: "Timeouts" },
-    { key: "npm_timeout_seconds", type: "number", label: "npm timeout (s)", min: 1, group: "Timeouts" },
-    { key: "build_timeout_seconds", type: "number", label: "Build timeout (s)", min: 1, group: "Timeouts" },
-    { key: "daemon_health_timeout_ms", type: "number", label: "Daemon health timeout (ms)", min: 0, group: "Timeouts" },
-  ],
-});
 
 defineReadme({
   description: "Plugin lifecycle manager for OpenCode and Claude Code launchers. Handles install, update, rebuild, downgrade, and uninstall operations for all plugins.",
@@ -282,7 +259,7 @@ export function uninstallPlugin(configDir: string, name: string): void {
   pruneOrphans(configDir, remaining);
 }
 
-export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise<void | object> {
+export async function earlyLaunch(configDir: string, plugins: Plugin[], opts: { trigger?: Trigger } = {}): Promise<void | object> {
   if (isOpencodeHookInvocation(configDir)) return {};
   // A caller can run this for several homes in one process (a dashboard iterating
   // over the installed apps), so the home is stated for the duration of the run and
@@ -290,14 +267,14 @@ export async function earlyLaunch(configDir: string, plugins: Plugin[]): Promise
   const outerContext = getActivityContext();
   setActivityContext({ home: configDir });
   try {
-    return await withCause({ kind: "startup", surface: "launch" }, () => earlyLaunchInScope(configDir, plugins));
+    return await withCause({ kind: "startup", surface: "launch" }, () => earlyLaunchInScope(configDir, plugins, opts.trigger ?? "app"));
   } finally {
     resetActivityContext();
     setActivityContext(outerContext);
   }
 }
 
-async function earlyLaunchInScope(configDir: string, plugins: Plugin[]): Promise<void> {
+async function earlyLaunchInScope(configDir: string, plugins: Plugin[], trigger: Trigger): Promise<void> {
   setEarlyLaunchConfigDir(configDir);
   writeLog("Starting earlyLaunch updater sequence");
 
@@ -328,31 +305,19 @@ async function earlyLaunchInScope(configDir: string, plugins: Plugin[]): Promise
 
   const updateOnLaunch = cfg.update_on_launch !== false;
 
-  // the update-status cache (<configDir>/cache/plugin-updates.json) is the single
-  // source of truth the loader TUI reads to render update state synchronously; it is
-  // assembled across this whole function and written once at the end (best-effort).
-  const checkedAt = new Date().toISOString();
-  const previousCache = readUpdateCache(configDir);
-  const cache: UpdateCache = { checkedAt, plugins: {} };
-
-  // update_on_launch:false suppresses remote-update work (selfUpdate, npm
-  // updates, and git pull/rebuild for already-cloned plugins). Plugins that
-  // have never been cloned still get a full clone+build so a freshly-added
-  // plugin is usable immediately even in manual-update mode.
-
-  // npm plugins listed in opencode.json. The cache is recorded for every npm plugin
-  // regardless of update_on_launch (cheap, best-effort registry lookups) so the
-  // loader can show npm update availability even in manual-update mode.
+  // npm plugins listed in opencode.json: their install path is npm's, not git's, so it
+  // stays here. Everything git-shaped, plus the cache both surfaces read, is runAutoUpdate's.
   const { plugins: npmNamesRaw } = readOpencodeJson(configDir);
   const npmNames = npmNamesRaw.map((raw) => raw.replace(/@[^@/]+$/, "") || raw);
   // snapshot BEFORE selfUpdate runs (this list includes "plugin-updater" itself when
-  // registered in opencode.json) so the before/after diff below can detect a self-update
+  // registered in opencode.json) so the before/after diff below detects a self-update
   const npmVersionsBefore = new Map<string, string | null>();
   for (const name of npmNames) npmVersionsBefore.set(name, resolveNpmPluginVersion(name, configDir) || null);
 
-  if (updateOnLaunch && cfg.self_update !== false) selfUpdate(configDir);
+  const installing = resolveMode(cfg) === "update";
+  if (installing && cfg.self_update !== false) selfUpdate(configDir);
 
-  if (updateOnLaunch) {
+  if (installing) {
     for (const name of npmNames) {
       if (name === "plugin-updater") continue; // already self-updated above
       writeLog(`npm earlyLaunch update for ${name}`);
@@ -365,108 +330,44 @@ async function earlyLaunchInScope(configDir: string, plugins: Plugin[]): Promise
     }
   }
 
-  const npmLatestVersions = await precomputeLatestNpmVersions(npmNames);
   for (const name of npmNames) {
     // plugin-updater is the thing doing the reporting, not one of the plugins it loads
     if (name !== "plugin-updater") {
       try { emitPluginActivated(name, { kind: "npm" }); } catch { /* never block launch */ }
     }
     const installedVersion = resolveNpmPluginVersion(name, configDir) || null;
-    const latestVersion = npmLatestVersions.get(name) ?? null;
     const before = npmVersionsBefore.get(name) ?? null;
-    const changed = before !== null && installedVersion !== null && before !== installedVersion;
-    const updateAvailable = npmUpdateAvailable(installedVersion, latestVersion);
-    if (changed) onInstalled(name, installedVersion, before, "launch");
-    else if (updateAvailable) emitPluginUpdateAvailable(name, installedVersion, latestVersion);
-    recordCacheEntry(cache, previousCache, name, {
-      kind: "npm",
-      installedVersion,
-      localHead: null,
-      remoteHead: null,
-      latestVersion,
-      updateAvailable,
-    }, changed, checkedAt);
+    if (before !== null && installedVersion !== null && before !== installedVersion) {
+      onInstalled(name, installedVersion, before, "launch");
+    }
   }
 
   if (!plugins || !Array.isArray(plugins)) {
     writeLog("No git plugins provided to earlyLaunch", true);
-    writeUpdateCache(configDir, cache);
+    await runAutoUpdate(configDir, { trigger, plugins: [], afterInstall: registerAppFromClone });
     return;
   }
 
-  // One parallel pass of ls-remote for all plugins up front, so the per-plugin
-  // change check below is a local comparison instead of N serial network round-trips.
-  // Not gated on updateOnLaunch/autoUpdate: it's a cheap ls-remote (no pull), so the
-  // cache/badge reflects real remote state even when actual pulls are skipped below.
-  const remoteHashes = await precomputeRemoteHashes(plugins);
-
-  for (const plugin of plugins) {
-    // absence of the enabled key means enabled, matching the loader TUI
-    if (plugin.enabled === false) { writeLog(`Skipping disabled plugin ${plugin.name}`); continue; }
-    if (!plugin.url) { writeLog(`Skipping ${plugin.name}: no url in plugins.json`, true); continue; }
-
-    const repoDir = path.join(configDir, "repos", plugin.name);
-    const alreadyCloned = fs.existsSync(repoDir);
-
-    // when update_on_launch is false, skip update+deploy for already-cloned
-    // plugins; only do a full clone+build for plugins not yet on disk. The remote
-    // is still checked (above) so the cache's updateAvailable reflects reality.
-    if (!updateOnLaunch && alreadyCloned) {
-      writeLog(`Skipping update for ${plugin.name} (update_on_launch disabled, already cloned) - checking remote only`);
-      const localHead = getLocalHead(plugin.name);
-      const remoteHead = remoteHashes.get(plugin.name) ?? null;
-      const updateAvailable = gitUpdateAvailable(localHead, remoteHead);
-      if (updateAvailable) emitPluginUpdateAvailable(plugin.name, localHead, remoteHead);
-      recordCacheEntry(cache, previousCache, plugin.name, {
-        kind: "git", installedVersion: null, localHead, remoteHead,
-        latestVersion: null, updateAvailable,
-      }, false, checkedAt);
-      continue;
-    }
-
-    // autoUpdate:false skips only the pull/build, once a clone already exists — a
-    // never-cloned plugin still needs its first install regardless of the flag. The
-    // remote is still checked so the cache's updateAvailable reflects reality.
-    if (plugin.autoUpdate === false && updateOnLaunch && alreadyCloned) {
-      writeLog(`Skipping auto-update for ${plugin.name} (autoUpdate off) - checking remote only`);
-      const localHead = getLocalHead(plugin.name);
-      const remoteHead = remoteHashes.get(plugin.name) ?? null;
-      const updateAvailable = gitUpdateAvailable(localHead, remoteHead);
-      if (updateAvailable) emitPluginUpdateAvailable(plugin.name, localHead, remoteHead);
-      recordCacheEntry(cache, previousCache, plugin.name, {
-        kind: "git", installedVersion: null, localHead, remoteHead,
-        latestVersion: null, updateAvailable,
-      }, false, checkedAt);
-      continue;
-    }
-
-    writeLog(`Processing earlyLaunch for ${plugin.name}`);
-    emitPluginProgress(plugin.name, alreadyCloned ? "updating" : "installing");
-    const previousVersion = alreadyCloned ? getLocalHead(plugin.name) : null;
-    try {
-      const updateResult = updatePlugin(plugin.name, plugin.url, plugin.branch, plugin.commitHash ?? null, plugin.updateInterval ?? defaultIntervalHours, remoteHashes.get(plugin.name));
-      const localHead = getLocalHead(plugin.name);
-      const remoteHead = remoteHashes.get(plugin.name) ?? null;
-      recordCacheEntry(cache, previousCache, plugin.name, {
-        kind: "git", installedVersion: null, localHead, remoteHead,
-        latestVersion: null, updateAvailable: gitUpdateAvailable(localHead, remoteHead),
-      }, updateResult.changed, checkedAt);
-      if (!updateResult.success) {
-        writeLog(`Skipping deploy for ${plugin.name}: update failed`, true);
-        emitPluginUpdateFailed(plugin.name, new Error(`update failed for ${plugin.name} - see the updater log`));
-        continue;
-      }
-      await deployToExecutionDir(plugin.name, path.join(configDir, "plugin"), updateResult.changed, configDir);
-      if (updateResult.changed) onInstalled(plugin.name, localHead, previousVersion, "launch");
-    } catch (e: unknown) {
-      writeLog(`Failed to process ${plugin.name}: ${(e as { message: string }).message}`, true);
-      emitPluginUpdateFailed(plugin.name, e);
-    }
-  }
-
-  writeUpdateCache(configDir, cache);
+  await runAutoUpdate(configDir, { trigger, plugins, afterInstall: registerAppFromClone });
 
   if (plugins.length > 0) pruneOrphans(configDir, plugins);
+}
+
+// The update surface, re-exported so a consumer reaches it the same way it reaches
+// updatePluginPublic: the registry side-effect is wired here, once.
+export { checkUpdates };
+export { updaterSchema };
+
+export function updateOne(configDir: string, name: string) {
+  return updateOneInHome(configDir, name, { afterInstall: registerAppFromClone });
+}
+
+export function updateAll(configDir: string) {
+  return updateAllInHome(configDir, { afterInstall: registerAppFromClone });
+}
+
+export function runUpdates(configDir: string, trigger: Trigger) {
+  return runAutoUpdate(configDir, { trigger, afterInstall: registerAppFromClone });
 }
 
 export async function activate(opencodeHookInput?: unknown): Promise<void | object> {
