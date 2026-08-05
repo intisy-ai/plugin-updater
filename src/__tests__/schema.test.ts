@@ -52,6 +52,20 @@ describe("updaterSchema", () => {
     expect(updaterSchema(home).menu?.label).toBeTruthy();
   });
 
+  // Each trigger is declared as its own dot-path field, so a generic settings screen can
+  // edit them one at a time instead of treating the whole object as opaque JSON.
+  it("declares a field per update trigger", () => {
+    const keys = (updaterSchema(home).fields ?? []).map((f) => f.key);
+    expect(keys).toContain("auto_update_triggers.loader");
+    expect(keys).toContain("auto_update_triggers.app");
+    expect(keys).toContain("auto_update_triggers.cairn");
+  });
+
+  it("reports a trigger a home turned off", () => {
+    writeConfig(home, { auto_update_triggers: { loader: true, app: false, cairn: true } });
+    expect(updaterSchema(home).current.auto_update_triggers).toEqual({ loader: true, app: false, cairn: true });
+  });
+
   // A dashboard reads the schema, writes a value through its OWN core instance, then reads
   // again. core's loadConfig caches per home for the life of the process (the absence of a
   // file included), so reading through it would report the pre-write state forever.
