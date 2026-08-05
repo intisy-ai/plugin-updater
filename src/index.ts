@@ -7,10 +7,13 @@ import { deployToExecutionDir } from "./deploy.js";
 import { syncAllAcrossApps } from "./syncbridge.js";
 import { checkUpdates, runAutoUpdate, updateOne as updateOneInHome, updateAll as updateAllInHome } from "./updates.js";
 import { resolveMode, type Trigger } from "./policy.js";
+// Importing this registers the config defaults and the capability schema, which must
+// happen before the CLI guard below so `config schema` answers.
+import { updaterSchema } from "./schema.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { defineConfig, defineCapabilities, loadConfig, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "../lib/core.js";
+import { loadConfig, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "../lib/core.js";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
@@ -29,38 +32,6 @@ import {
 // This bundle's core instance is only ever used by this plugin, so naming the entry
 // once here is accurate for every event it emits, including the ones outside a run.
 setActivityContext({ entry: "updater" });
-
-// `node dist/index.js config …` (from the /plugin-updater-config command) runs the
-// config CLI and exits, before the self-activation/updater sequence below.
-// Register config defaults BEFORE the CLI guard so `config schema` sees them (no write).
-defineConfig("plugin-updater", {
-  logging: true,
-  default_update_interval_hours: 1,
-  git_timeout_seconds: 120,
-  npm_timeout_seconds: 300,
-  build_timeout_seconds: 300,
-  daemon_health_timeout_ms: 1500,
-  self_update: true,
-  update_on_launch: true,
-  auto_update_mode: "update",
-  auto_update_triggers: { loader: true, app: true, cairn: true },
-});
-
-defineCapabilities("plugin-updater", {
-  fields: [
-    { key: "logging", type: "boolean", label: "Logging", group: "General" },
-    { key: "self_update", type: "boolean", label: "Self-update", description: "Keep plugin-updater itself current.", group: "Updates" },
-    { key: "auto_update_mode", type: "select", label: "Automatic updates", group: "Updates",
-      description: "off checks nothing on startup, check only records what is available, update also installs it.",
-      options: [{ value: "off", label: "off" }, { value: "check", label: "check" }, { value: "update", label: "update" }] },
-    { key: "update_on_launch", type: "boolean", label: "Update on launch", group: "Updates" },
-    { key: "default_update_interval_hours", type: "number", label: "Update interval (h)", min: 0, group: "Updates" },
-    { key: "git_timeout_seconds", type: "number", label: "Git timeout (s)", min: 1, group: "Timeouts" },
-    { key: "npm_timeout_seconds", type: "number", label: "npm timeout (s)", min: 1, group: "Timeouts" },
-    { key: "build_timeout_seconds", type: "number", label: "Build timeout (s)", min: 1, group: "Timeouts" },
-    { key: "daemon_health_timeout_ms", type: "number", label: "Daemon health timeout (ms)", min: 0, group: "Timeouts" },
-  ],
-});
 
 defineReadme({
   description: "Plugin lifecycle manager for OpenCode and Claude Code launchers. Handles install, update, rebuild, downgrade, and uninstall operations for all plugins.",
@@ -385,6 +356,7 @@ async function earlyLaunchInScope(configDir: string, plugins: Plugin[], trigger:
 // The update surface, re-exported so a consumer reaches it the same way it reaches
 // updatePluginPublic: the registry side-effect is wired here, once.
 export { checkUpdates };
+export { updaterSchema };
 
 export function updateOne(configDir: string, name: string) {
   return updateOneInHome(configDir, name, { afterInstall: registerAppFromClone });

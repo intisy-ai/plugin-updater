@@ -18,22 +18,8 @@ import {
 import { emitUpdatesAvailable, emitPluginUpdated, emitPluginInstalled, emitPluginUpdateFailed, emitPluginProgress } from "./pluginActivity.js";
 import { deployToExecutionDir } from "./deploy.js";
 import { shouldPull, triggerEnabled, type Trigger } from "./policy.js";
+import { readUpdaterConfig } from "./schema.js";
 import type { Plugin } from "./types.js";
-
-// Policy must reflect what is on disk NOW. core's loadConfig caches per home for the
-// life of the process (including the absence of a file, which is what a plugin sees when
-// it loads before a home is configured), so a mode changed by a dashboard or by hand
-// would otherwise not apply until every process restarted.
-function readUpdaterConfig(configDir: string): Record<string, unknown> {
-  for (const file of [path.join(configDir, "config", "plugin-updater.json"), path.join(configDir, "plugin-updater.json")]) {
-    try {
-      if (!fs.existsSync(file)) continue;
-      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
-    } catch { /* an unreadable config means defaults, never a crash */ }
-  }
-  return {};
-}
 
 export interface CheckResult {
   checkedAt: string;
