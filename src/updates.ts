@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import { writeLog } from "./log.js";
 import { getPlugins, readOpencodeJson } from "./config.js";
-import { precomputeRemoteHashes, getLocalHead } from "./git.js";
+import { precomputeRemoteHashes, getLocalHead, updatePlugin } from "./git.js";
 import { precomputeLatestNpmVersions, resolveNpmPluginVersion } from "./npm.js";
 import {
   readUpdateCache,
@@ -15,7 +15,11 @@ import {
   npmUpdateAvailable,
   type UpdateCache,
 } from "./cache.js";
-import { emitUpdatesAvailable } from "./pluginActivity.js";
+import { emitUpdatesAvailable, emitPluginUpdated, emitPluginInstalled, emitPluginUpdateFailed, emitPluginProgress } from "./pluginActivity.js";
+import { deployToExecutionDir } from "./deploy.js";
+// @ts-ignore: generated bundle, no .d.ts
+import { loadConfig } from "../lib/core.js";
+import { shouldPull, triggerEnabled, type Trigger } from "./policy.js";
 import type { Plugin } from "./types.js";
 
 export interface CheckResult {
@@ -105,4 +109,117 @@ export async function withUpdateLock<T>(configDir: string, fn: () => Promise<T>)
   } finally {
     try { fs.unlinkSync(lockPath(configDir)); } catch { /* a leftover lock goes stale on its own */ }
   }
+}
+
+export interface UpdateOutcome {
+  updated: string[];
+  skipped: string[];
+  failed: string[];
+  checkedAt: string;
+}
+
+export interface PullOptions {
+  trigger?: Trigger;
+  plugins?: Plugin[];
+  // the registry side-effect a fresh clone needs (a loader's cairn.json may have moved);
+  // injected so this module never reaches back into the entry point
+  afterInstall?: (name: string) => void;
+  // when set, only these names are considered, and policy is ignored because a human asked
+  only?: string[];
+}
+
+function emptyOutcome(checkedAt: string): UpdateOutcome {
+  return { updated: [], skipped: [], failed: [], checkedAt };
+}
+
+// The one pull path. `only` means a human asked for it, so policy does not apply; without
+// it every candidate is filtered through the home's mode and the plugin's own flag.
+async function pullCandidates(configDir: string, check: CheckResult, opts: PullOptions): Promise<UpdateOutcome> {
+  const cfg = loadConfig("plugin-updater") as Record<string, unknown>;
+  const defaultIntervalHours = typeof cfg.default_update_interval_hours === "number" ? cfg.default_update_interval_hours : 1;
+  const list = (opts.plugins ?? getPlugins(configDir)).filter(enabled);
+  const byHuman = Array.isArray(opts.only);
+  const outcome = emptyOutcome(check.checkedAt);
+  const cache = check.cache;
+  const previousCache = readUpdateCache(configDir);
+
+  for (const plugin of list) {
+    if (byHuman && !(opts.only as string[]).includes(plugin.name)) continue;
+    if (!plugin.url) { outcome.skipped.push(plugin.name); continue; }
+    const entry = cache.plugins[plugin.name];
+    const alreadyCloned = fs.existsSync(path.join(configDir, "repos", plugin.name));
+    if (alreadyCloned && entry && !entry.updateAvailable && !byHuman) continue;
+    if (!byHuman && alreadyCloned && !shouldPull(cfg, plugin.autoUpdate)) {
+      outcome.skipped.push(plugin.name);
+      continue;
+    }
+
+    const previousVersion = alreadyCloned ? getLocalHead(plugin.name) : null;
+    emitPluginProgress(plugin.name, alreadyCloned ? "updating" : "installing");
+    try {
+      const result = updatePlugin(
+        plugin.name, plugin.url, plugin.branch, plugin.commitHash ?? null,
+        byHuman ? 0 : (plugin.updateInterval ?? defaultIntervalHours),
+        entry?.remoteHead ?? undefined,
+      );
+      const localHead = getLocalHead(plugin.name);
+      recordCacheEntry(cache, previousCache, plugin.name, {
+        kind: "git", installedVersion: null, localHead, remoteHead: entry?.remoteHead ?? null,
+        latestVersion: null, updateAvailable: gitUpdateAvailable(localHead, entry?.remoteHead ?? null),
+      }, result.changed, check.checkedAt);
+      if (!result.success) {
+        emitPluginUpdateFailed(plugin.name, new Error(`update failed for ${plugin.name} - see the updater log`));
+        outcome.failed.push(plugin.name);
+        continue;
+      }
+      await deployToExecutionDir(plugin.name, path.join(configDir, "plugin"), result.changed, configDir);
+      if (result.changed) {
+        if (previousVersion !== null) emitPluginUpdated(plugin.name, previousVersion, localHead, byHuman ? "manual" : "launch");
+        else emitPluginInstalled(plugin.name, localHead, byHuman ? "manual" : "launch");
+        outcome.updated.push(plugin.name);
+      }
+      try { opts.afterInstall?.(plugin.name); } catch { /* registry work is best-effort */ }
+    } catch (e: unknown) {
+      writeLog(`Failed to update ${plugin.name}: ${(e as { message?: string }).message ?? e}`, true);
+      emitPluginUpdateFailed(plugin.name, e);
+      outcome.failed.push(plugin.name);
+    }
+  }
+
+  writeUpdateCache(configDir, cache);
+  return outcome;
+}
+
+// Startup path: a check always runs for an enabled trigger, and only the pull is gated.
+export async function runAutoUpdate(configDir: string, opts: PullOptions & { trigger: Trigger }): Promise<UpdateOutcome> {
+  const cfg = loadConfig("plugin-updater") as Record<string, unknown>;
+  if (!triggerEnabled(cfg, opts.trigger)) {
+    writeLog(`Skipping update run: the ${opts.trigger} trigger is off in ${configDir}`);
+    return emptyOutcome(new Date().toISOString());
+  }
+  const result = await withUpdateLock(configDir, async () => {
+    const check = await checkUpdates(configDir, opts.plugins);
+    return pullCandidates(configDir, check, opts);
+  });
+  return result ?? emptyOutcome(new Date().toISOString());
+}
+
+// A human asked, so neither the mode nor the per-plugin flag applies.
+export async function updateOne(configDir: string, name: string, opts: PullOptions = {}): Promise<UpdateOutcome> {
+  const list = (opts.plugins ?? getPlugins(configDir)).filter(enabled);
+  if (!list.some((p) => p.name === name)) throw new Error(`plugin not found: ${name}`);
+  const result = await withUpdateLock(configDir, async () => {
+    const check = await checkUpdates(configDir, opts.plugins);
+    return pullCandidates(configDir, check, { ...opts, only: [name] });
+  });
+  return result ?? emptyOutcome(new Date().toISOString());
+}
+
+export async function updateAll(configDir: string, opts: PullOptions = {}): Promise<UpdateOutcome> {
+  const result = await withUpdateLock(configDir, async () => {
+    const check = await checkUpdates(configDir, opts.plugins);
+    const names = (opts.plugins ?? getPlugins(configDir)).filter(enabled).map((p) => p.name);
+    return pullCandidates(configDir, check, { ...opts, only: names });
+  });
+  return result ?? emptyOutcome(new Date().toISOString());
 }

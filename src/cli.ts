@@ -275,7 +275,8 @@ async function main(): Promise<void> {
     }
   } else {
     const entries = (readJson(pluginsJsonPath(configDir)) as unknown as Array<Record<string, unknown>>) ?? [];
-    await updater.earlyLaunch(configDir, entries as never);
+    // the CLI is how a loader asks for a run; the app path is activate() at module load
+    await updater.earlyLaunch(configDir, entries as never, { trigger: "loader" });
   }
 }
 
