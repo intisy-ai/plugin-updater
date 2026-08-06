@@ -48,8 +48,10 @@ describe("updaterSchema", () => {
     expect(updaterSchema(home).current.auto_update_mode).toBe("check");
   });
 
-  it("carries the declared menu, so an engine can contribute one", () => {
-    expect(updaterSchema(home).menu?.label).toBeTruthy();
+  // The mechanism stays available to every plugin; the manager just has nothing to put in a
+  // menu of its own, since its settings belong in Settings like any other plugin's.
+  it("declares no menu of its own", () => {
+    expect(updaterSchema(home).menu).toBeUndefined();
   });
 
   // Each trigger is declared as its own dot-path field, so a generic settings screen can

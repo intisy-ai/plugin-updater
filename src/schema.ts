@@ -40,7 +40,6 @@ defineCapabilities(UPDATER_NAME, {
     { key: "build_timeout_seconds", type: "number", label: "Build timeout (s)", min: 1, group: "Timeouts" },
     { key: "daemon_health_timeout_ms", type: "number", label: "Daemon health timeout (ms)", min: 0, group: "Timeouts" },
   ],
-  menu: { label: "Updates", glyph: "⟳" },
 });
 
 // Config as it is on disk NOW. core's loadConfig caches per home for the life of the
