@@ -43,7 +43,7 @@ let npmGlobalRoot: string | null = null;
 export function getNpmGlobalRoot(): string {
   if (npmGlobalRoot !== null) return npmGlobalRoot;
   try {
-    npmGlobalRoot = execSync("npm root -g", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+    npmGlobalRoot = execSync("npm root -g", { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
   } catch {
     npmGlobalRoot = "";
   }
@@ -102,7 +102,7 @@ export function installNpmPlugin(name: string, configDir: string): string {
       (raw.plugin as string[] | undefined) = [...plugins, name];
       writeOpencodeJson(configDir, raw);
     }
-    execSync(`npm install -g ${name}`, { stdio: "pipe", timeout: getNpmTimeoutMs() });
+    execSync(`npm install -g ${name}`, { windowsHide: true, stdio: "pipe", timeout: getNpmTimeoutMs() });
     writeLog(`Installed npm plugin: ${name}`);
     return "";
   } catch (e: unknown) {
@@ -122,7 +122,7 @@ export function uninstallNpmPlugin(name: string, configDir: string): string {
       return pName !== name;
     });
     writeOpencodeJson(configDir, raw);
-    execSync(`npm uninstall -g ${name}`, { stdio: "pipe", timeout: getNpmTimeoutMs() });
+    execSync(`npm uninstall -g ${name}`, { windowsHide: true, stdio: "pipe", timeout: getNpmTimeoutMs() });
     writeLog(`Uninstalled npm plugin: ${name}`);
     return "";
   } catch (e: unknown) {
@@ -149,7 +149,7 @@ export function updateNpmPlugin(name: string, configDir: string, updateInterval 
       return "";
     }
     fs.writeFileSync(checkFile, Date.now().toString());
-    execSync(`npm update -g ${name}`, { stdio: "pipe", timeout: getNpmTimeoutMs() });
+    execSync(`npm update -g ${name}`, { windowsHide: true, stdio: "pipe", timeout: getNpmTimeoutMs() });
     writeLog(`Updated npm plugin: ${name}`);
     return "";
   } catch (e: unknown) {

@@ -75,7 +75,7 @@ export function gitProgressFlag(): string {
 export function executeGit(command: string, cwd: string): boolean {
   writeLog(`Executing git: ${command} in ${cwd}`);
   try {
-    execSync(command, {
+    execSync(command, { windowsHide: true,
       cwd,
       stdio: gitProgressStreaming() ? ["ignore", "pipe", "inherit"] : "pipe",
       timeout: getGitTimeoutMs(),
@@ -130,8 +130,8 @@ export function updatePlugin(
           // added after the pre-pass).
           const remoteHash = remoteHashHint !== undefined
             ? remoteHashHint
-            : (execSync(`git ls-remote origin ${ref}`, { cwd: targetDir }).toString().trim().split(/\s+/)[0] || "");
-          const localHash = execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim();
+            : (execSync(`git ls-remote origin ${ref}`, { windowsHide: true, cwd: targetDir }).toString().trim().split(/\s+/)[0] || "");
+          const localHash = execSync("git rev-parse HEAD", { windowsHide: true, cwd: targetDir }).toString().trim();
           remoteMoved = !!remoteHash && !!localHash && remoteHash !== localHash;
         } catch { /* offline / transient — fall back to skipping until the interval */ }
       }
@@ -155,7 +155,7 @@ export function updatePlugin(
     executeGit(`git fetch origin${gitProgressFlag()}`, targetDir);
 
     let beforeHash = "";
-    try { beforeHash = execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim(); } catch { /* ignore */ }
+    try { beforeHash = execSync("git rev-parse HEAD", { windowsHide: true, cwd: targetDir }).toString().trim(); } catch { /* ignore */ }
 
     if (commitHash) {
       executeGit(`git checkout ${commitHash}`, targetDir);
@@ -181,7 +181,7 @@ export function updatePlugin(
     }
 
     let afterHash = "";
-    try { afterHash = execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim(); } catch { /* ignore */ }
+    try { afterHash = execSync("git rev-parse HEAD", { windowsHide: true, cwd: targetDir }).toString().trim(); } catch { /* ignore */ }
 
     if (beforeHash !== afterHash) didChange = true;
   }
@@ -193,7 +193,7 @@ export function getLocalHead(pluginName: string): string | null {
   const targetDir = path.join(getReposDir(), pluginName);
   if (!fs.existsSync(targetDir)) return null;
   try {
-    return execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim() || null;
+    return execSync("git rev-parse HEAD", { windowsHide: true, cwd: targetDir }).toString().trim() || null;
   } catch {
     return null;
   }
@@ -215,12 +215,12 @@ export function buildInTempDir(pluginName: string, sourceDir: string): void {
 
     const buildTimeoutMs = getBuildTimeoutMs();
     writeLog(`Running npm install for ${pluginName}`);
-    execSync("npm install", { cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
+    execSync("npm install", { windowsHide: true, cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
     writeLog(`Finished npm install for ${pluginName}`);
 
     const pkg = JSON.parse(fs.readFileSync(path.join(tempDir, "package.json"), "utf8")) as { scripts?: { build?: string } };
     if (pkg.scripts?.build) {
-      execSync("npm run build", { cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
+      execSync("npm run build", { windowsHide: true, cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
       writeLog(`Finished npm run build for ${pluginName}`);
     } else {
       writeLog(`Skipped npm run build for ${pluginName} (no build script found)`);

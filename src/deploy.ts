@@ -10,7 +10,7 @@ import { startDeclaredDaemon } from "./daemon.js";
 // The clone's current commit, used to tie a deployed artifact to the source it was
 // built from (self-heals a stale deploy left by an earlier interrupted pass).
 function repoHead(dir: string): string {
-  try { return execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf8" }).trim(); } catch { return ""; }
+  try { return execSync("git rev-parse HEAD", { windowsHide: true, cwd: dir, encoding: "utf8" }).trim(); } catch { return ""; }
 }
 
 // A loader plugin self-describes as one via cairn.json's `app.loader.id` (see
@@ -113,7 +113,7 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
       const runtimeDeps = (JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as { dependencies?: Record<string, string> }).dependencies;
       if (runtimeDeps && Object.keys(runtimeDeps).length > 0) {
         writeLog(`Installing runtime dependencies for ${pluginName}`);
-        execSync("npm install --omit=dev", { cwd: sourceDir, stdio: "pipe" });
+        execSync("npm install --omit=dev", { windowsHide: true, cwd: sourceDir, stdio: "pipe" });
         writeLog(`Finished runtime dependencies for ${pluginName}`);
       }
     } catch (error: unknown) {
