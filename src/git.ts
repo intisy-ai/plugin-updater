@@ -75,7 +75,8 @@ export function gitProgressFlag(): string {
 export function executeGit(command: string, cwd: string): boolean {
   writeLog(`Executing git: ${command} in ${cwd}`);
   try {
-    execSync(command, { windowsHide: true,
+    execSync(command, {
+      windowsHide: true,
       cwd,
       stdio: gitProgressStreaming() ? ["ignore", "pipe", "inherit"] : "pipe",
       timeout: getGitTimeoutMs(),

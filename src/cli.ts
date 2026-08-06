@@ -34,7 +34,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 function binaryExists(name: string): boolean {
   try {
     const probe = process.platform === "win32" ? `where ${name}` : `command -v ${name}`;
-    require("child_process").execSync(probe, { stdio: "ignore" });
+    require("child_process").execSync(probe, { stdio: "ignore", windowsHide: true });
     return true;
   } catch {
     return false;
