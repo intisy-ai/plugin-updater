@@ -5,10 +5,12 @@ process.env.PLUGIN_UPDATER_CLI = "1";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { resolveOpencodeConfigPath, insertPluginIntoJsonc, resolveInitApps, cwdApp, type PresentApps } from "./init.js";
+import { resolveInitApps, cwdApp, ensurePluginsJson, registerUpdaterWithApp, type PresentApps } from "./init.js";
 import { getAppConfigDir } from "./env.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { getApps } from "../lib/core.js";
+
+const UPDATER_NAME = "plugin-updater";
 
 interface ParsedArgs {
   command: string;
@@ -76,61 +78,6 @@ function readJson(file: string): Record<string, unknown> | null {
 
 function pluginsJsonPath(configDir: string): string {
   return path.join(configDir, "config", "plugins.json");
-}
-
-function ensurePluginsJson(configDir: string): void {
-  const file = pluginsJsonPath(configDir);
-  if (!fs.existsSync(path.dirname(file))) fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (!fs.existsSync(file)) fs.writeFileSync(file, "[]\n", "utf8");
-}
-
-function registerClaudeHook(configDir: string): void {
-  const settingsPath = path.join(configDir, "settings.json");
-  const settings = (fs.existsSync(settingsPath) ? readJson(settingsPath) : {}) ?? {};
-  const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>;
-  const sessionStart = (hooks.SessionStart ?? []) as unknown[];
-  if (!JSON.stringify(sessionStart).includes("plugin-updater")) {
-    // @latest so npx re-resolves the tag instead of pinning its first cached copy
-    sessionStart.push({ hooks: [{ type: "command", command: "npx -y plugin-updater@latest run --app claude" }] });
-  }
-  hooks.SessionStart = sessionStart;
-  settings.hooks = hooks;
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
-  console.log(`Registered SessionStart hook in ${settingsPath}`);
-}
-
-function registerOpencodePlugin(configDir: string): void {
-  // Edit the EXISTING opencode config (opencode.json, else opencode.jsonc) rather than
-  // always creating opencode.json — opencode reads either and two files are confusing.
-  const ocPath = resolveOpencodeConfigPath(configDir);
-  const exists = fs.existsSync(ocPath);
-  const raw = exists ? fs.readFileSync(ocPath, "utf8") : "";
-  const parsed = (exists ? readJson(ocPath) : null) ?? null;
-  // opencode plugin entries may be a string OR a [name, options] tuple — guard accordingly
-  const plugins = Array.isArray(parsed?.plugin) ? (parsed!.plugin as unknown[]) : [];
-  const has = plugins.some((p) =>
-    p === "plugin-updater"
-    || (typeof p === "string" && p.startsWith("plugin-updater@"))
-    || (Array.isArray(p) && p[0] === "plugin-updater"));
-  if (has) {
-    console.log(`plugin-updater already registered in ${ocPath}`);
-    return;
-  }
-  // Comment-preserving in-place insert for an existing file; fall back to a fresh JSON
-  // write only when there's no file or the text can't be safely edited.
-  if (exists && raw.trim()) {
-    const edited = insertPluginIntoJsonc(raw, "plugin-updater", Array.isArray(parsed?.plugin));
-    if (edited) {
-      fs.writeFileSync(ocPath, edited, "utf8");
-      console.log(`Registered plugin-updater in ${ocPath}`);
-      return;
-    }
-  }
-  const oc = (parsed ?? {}) as Record<string, unknown>;
-  oc.plugin = ["plugin-updater", ...plugins];
-  if (!oc.$schema) oc.$schema = "https://opencode.ai/config.json";
-  fs.writeFileSync(ocPath, JSON.stringify(oc, null, 2), "utf8");
-  console.log(`Registered plugin-updater in ${ocPath}`);
 }
 
 // which apps are installed on this machine (used when no --app is given)
@@ -242,9 +189,10 @@ async function main(): Promise<void> {
       const configDir = getConfigDir(app);
       if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
       console.log(`App: ${app} (${configDir})`);
-      ensurePluginsJson(configDir);
-      if (app === "claude") registerClaudeHook(configDir);
-      else registerOpencodePlugin(configDir);
+      const registration = registerUpdaterWithApp(configDir, app);
+      console.log(registration.changed
+        ? `Registered ${UPDATER_NAME} in ${registration.target}`
+        : `${UPDATER_NAME} already registered in ${registration.target}`);
       for (const url of parsed.urls) {
         await setupEntry(updater, configDir, url, parsed.branch, parsed.sync);
       }
