@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSy
 import { tmpdir } from "os";
 import { join } from "path";
 import { execFileSync } from "child_process";
-import { isLoaderPlugin, deployEntryFile } from "../deploy.js";
+import { isLoaderPlugin, deployEntryFile, missingDeclaredArtifacts } from "../deploy.js";
 
 describe("isLoaderPlugin", () => {
   let sourceDir: string;
@@ -113,4 +113,59 @@ describe("the deployed artifact", () => {
       rmSync(isolated, { recursive: true, force: true });
     }
   }, 30000);
+});
+
+// A provider whose handler never landed still loads its main entry, so "the deployed file
+// exists" is not proof the build finished. Without this check the fast path skipped the
+// rebuild forever and the provider's accounts stayed unreachable.
+describe("missingDeclaredArtifacts", () => {
+  let sourceDir: string;
+  beforeEach(() => {
+    sourceDir = mkdtempSync(join(tmpdir(), "pu-artifacts-"));
+    mkdirSync(join(sourceDir, "dist"), { recursive: true });
+  });
+  afterEach(() => {
+    rmSync(sourceDir, { recursive: true, force: true });
+  });
+
+  function writePkg(pkg: unknown): string {
+    const at = join(sourceDir, "package.json");
+    writeFileSync(at, JSON.stringify(pkg));
+    return at;
+  }
+
+  const providerPkg = {
+    main: "dist/index.js",
+    claudeHub: { authProviders: [{ name: "claude-code", handler: "dist/handler.js" }] },
+  };
+
+  it("names a declared provider handler the build did not produce", () => {
+    const pkgPath = writePkg(providerPkg);
+    writeFileSync(join(sourceDir, "dist", "index.js"), "");
+    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual(["dist/handler.js"]);
+  });
+
+  it("reports nothing once every declared file is in place", () => {
+    const pkgPath = writePkg(providerPkg);
+    writeFileSync(join(sourceDir, "dist", "index.js"), "");
+    writeFileSync(join(sourceDir, "dist", "handler.js"), "");
+    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual([]);
+  });
+
+  it("reads a top-level authProviders declaration too", () => {
+    const pkgPath = writePkg({ main: "dist/index.js", authProviders: [{ handler: "dist/h.js" }] });
+    writeFileSync(join(sourceDir, "dist", "index.js"), "");
+    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual(["dist/h.js"]);
+  });
+
+  it("holds no opinion about a plugin that declares nothing but its entry", () => {
+    const pkgPath = writePkg({ main: "dist/index.js" });
+    writeFileSync(join(sourceDir, "dist", "index.js"), "");
+    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual([]);
+  });
+
+  it("stays quiet on an unreadable package.json rather than claiming everything is missing", () => {
+    writeFileSync(join(sourceDir, "package.json"), "{ not json");
+    expect(missingDeclaredArtifacts(sourceDir, join(sourceDir, "package.json"))).toEqual([]);
+  });
 });

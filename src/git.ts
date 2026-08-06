@@ -200,6 +200,53 @@ export function getLocalHead(pluginName: string): string | null {
   }
 }
 
+const COPY_RETRIES = 12;
+const COPY_RETRY_DELAY_MS = 250;
+
+function copyFileWithRetry(from: string, to: string): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.copyFileSync(from, to);
+      return;
+    } catch (e: unknown) {
+      // On Windows a file a running process has open cannot be overwritten. A handler
+      // another process imported is exactly that, so wait for it to let go rather than
+      // leaving the built artifact behind.
+      const code = (e as { code?: string }).code;
+      if (attempt >= COPY_RETRIES || (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES")) throw e;
+      sleepSync(COPY_RETRY_DELAY_MS);
+    }
+  }
+}
+
+function sleepSync(ms: number): void {
+  const until = Date.now() + ms;
+  while (Date.now() < until) { /* the build is synchronous throughout; nothing to yield to */ }
+}
+
+// One file at a time, so a single locked artifact cannot abandon the rest of the tree
+// half-copied the way a recursive copy does.
+function copyTree(from: string, to: string, pluginName: string): void {
+  fs.mkdirSync(to, { recursive: true });
+  const failures: string[] = [];
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const source = path.join(from, entry.name);
+    const target = path.join(to, entry.name);
+    if (entry.isDirectory()) {
+      copyTree(source, target, pluginName);
+      continue;
+    }
+    try {
+      copyFileWithRetry(source, target);
+    } catch (e: unknown) {
+      failures.push(`${entry.name} (${(e as { message: string }).message})`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`could not write ${failures.length} built file(s) for ${pluginName}: ${failures.join(", ")}`);
+  }
+}
+
 // npm install creates node_modules/.bin symlinks, which fail on filesystems
 // without symlink support (e.g. Windows-backed Docker bind mounts) — build in
 // the OS temp dir and copy the outputs back instead
@@ -230,7 +277,7 @@ export function buildInTempDir(pluginName: string, sourceDir: string): void {
     for (const outputDir of BUILD_OUTPUT_DIRS) {
       const builtDir = path.join(tempDir, outputDir);
       if (fs.existsSync(builtDir)) {
-        fs.cpSync(builtDir, path.join(sourceDir, outputDir), { recursive: true });
+        copyTree(builtDir, path.join(sourceDir, outputDir), pluginName);
       }
     }
   } finally {
