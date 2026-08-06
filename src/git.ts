@@ -61,12 +61,23 @@ function getBuildTimeoutMs(): number {
   return seconds * 1000;
 }
 
+// A host driving an install can show real transfer progress, but only if git streams it:
+// git stays silent on a non-TTY unless asked, and the default capture holds stderr back for
+// the error log. Opt in and stderr is inherited instead, so the host sees it live.
+export function gitProgressStreaming(): boolean {
+  return (process.env.PLUGIN_UPDATER_GIT_PROGRESS || "").trim() === "1";
+}
+
+export function gitProgressFlag(): string {
+  return gitProgressStreaming() ? " --progress" : "";
+}
+
 export function executeGit(command: string, cwd: string): boolean {
   writeLog(`Executing git: ${command} in ${cwd}`);
   try {
     execSync(command, {
       cwd,
-      stdio: "pipe",
+      stdio: gitProgressStreaming() ? ["ignore", "pipe", "inherit"] : "pipe",
       timeout: getGitTimeoutMs(),
       env: { ...process.env, GCM_INTERACTIVE: "never", GIT_TERMINAL_PROMPT: "0" },
     });
@@ -95,7 +106,7 @@ export function updatePlugin(
   if (!fs.existsSync(targetDir)) {
     if (!fs.existsSync(reposDir)) fs.mkdirSync(reposDir, { recursive: true });
     const branchFlag = branch ? `--branch ${branch}` : "";
-    const cloned = executeGit(`git clone --recurse-submodules ${branchFlag} ${gitUrl} ${pluginName}`, reposDir);
+    const cloned = executeGit(`git clone --recurse-submodules${gitProgressFlag()} ${branchFlag} ${gitUrl} ${pluginName}`, reposDir);
     if (!cloned) return { success: false, changed: false };
     fs.writeFileSync(lastCheckFile, Date.now().toString());
     didChange = true;
@@ -141,7 +152,7 @@ export function updatePlugin(
     }
 
     fs.writeFileSync(lastCheckFile, Date.now().toString());
-    executeGit("git fetch origin", targetDir);
+    executeGit(`git fetch origin${gitProgressFlag()}`, targetDir);
 
     let beforeHash = "";
     try { beforeHash = execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim(); } catch { /* ignore */ }
@@ -154,7 +165,7 @@ export function updatePlugin(
     } else {
       // the updater owns repos/: hard-sync to the remote so force-pushed
       // branches and rewritten submodule history cannot strand the clone
-      executeGit("git fetch origin", targetDir);
+      executeGit(`git fetch origin${gitProgressFlag()}`, targetDir);
       executeGit("git checkout main || git checkout master", targetDir);
       executeGit("git reset --hard @{upstream}", targetDir);
     }
@@ -164,7 +175,7 @@ export function updatePlugin(
       writeLog(`Submodule sync failed for ${pluginName}, recloning`, true);
       try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch { /* ignore */ }
       const recloneBranchFlag = branch ? `--branch ${branch}` : "";
-      executeGit(`git clone --recurse-submodules ${recloneBranchFlag} ${gitUrl} ${pluginName}`, reposDir);
+      executeGit(`git clone --recurse-submodules${gitProgressFlag()} ${recloneBranchFlag} ${gitUrl} ${pluginName}`, reposDir);
       fs.writeFileSync(lastCheckFile, Date.now().toString());
       didChange = true;
     }
