@@ -268,6 +268,10 @@ export function buildInTempDir(pluginName: string, sourceDir: string): void {
 
     const pkg = JSON.parse(fs.readFileSync(path.join(tempDir, "package.json"), "utf8")) as { scripts?: { build?: string } };
     if (pkg.scripts?.build) {
+      // Said BEFORE the build, not only after: this is the longest step by far (a
+      // provider transpiles Java through gradle here), and without it the progress
+      // readout sat on the previous step's label for the whole thing.
+      writeLog(`Running npm run build for ${pluginName}`);
       execSync("npm run build", { windowsHide: true, cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
       writeLog(`Finished npm run build for ${pluginName}`);
     } else {
@@ -277,6 +281,8 @@ export function buildInTempDir(pluginName: string, sourceDir: string): void {
     for (const outputDir of BUILD_OUTPUT_DIRS) {
       const builtDir = path.join(tempDir, outputDir);
       if (fs.existsSync(builtDir)) {
+        // A built dist can be hundreds of megabytes, so this is worth naming too.
+        writeLog(`Copying build output ${outputDir}/ for ${pluginName}`);
         copyTree(builtDir, path.join(sourceDir, outputDir), pluginName);
       }
     }
