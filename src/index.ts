@@ -374,7 +374,7 @@ async function earlyLaunchInScope(configDir: string, plugins: Plugin[], trigger:
 // The update surface, re-exported so a consumer reaches it the same way it reaches
 // updatePluginPublic: the registry side-effect is wired here, once.
 export { checkUpdates };
-export { checkPluginHealth, checkAllPluginHealth, repairPlugin, type PluginHealth } from "./repair.js";
+export { checkPluginHealth, checkAllPluginHealth, missingPluginArtifacts, repairPlugin, type PluginHealth } from "./repair.js";
 export { updaterSchema };
 
 export function updateOne(configDir: string, name: string) {

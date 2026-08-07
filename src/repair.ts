@@ -19,8 +19,17 @@ export interface PluginHealth {
   head: string | null;
 }
 
+// The build outputs a plugin declares but does not have. Pure filesystem work, split
+// out because the full health check spawns git for the head and callers that only
+// want this were paying for a subprocess per plugin.
+export function missingPluginArtifacts(configDir: string, name: string): string[] {
+  const sourceDir = path.join(getReposDir(configDir), name);
+  if (!fs.existsSync(sourceDir)) return [];
+  return missingDeclaredArtifacts(sourceDir, path.join(sourceDir, "package.json"));
+}
+
 export function checkPluginHealth(configDir: string, name: string): PluginHealth {
-  const sourceDir = path.join(getReposDir(), name);
+  const sourceDir = path.join(getReposDir(configDir), name);
   const cloned = fs.existsSync(sourceDir);
   const deployed = fs.existsSync(path.join(getPluginDir(configDir), `${name}.js`));
   const missing = cloned ? missingDeclaredArtifacts(sourceDir, path.join(sourceDir, "package.json")) : [];
