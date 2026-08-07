@@ -4,7 +4,7 @@ import { getAppName } from "./env.js";
 import { writeLog } from "./log.js";
 import type { DaemonManifest } from "./types.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { loadConfig, getAppDescriptor, activityEnv } from "../lib/core.js";
+import { loadConfig, getAppDescriptor, activityEnv } from "@intisy-ai/core";
 
 // The registry's human label for the running app (e.g. "Claude Code", "OpenCode"),
 // falling back to the raw app id when it isn't registered yet.

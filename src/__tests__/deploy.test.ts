@@ -9,6 +9,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { execFileSync } from "child_process";
 import { isLoaderPlugin, deployEntryFile, missingDeclaredArtifacts } from "../deploy.js";
+import { materializeLibraries } from "../shared-libs.js";
 
 describe("isLoaderPlugin", () => {
   let sourceDir: string;
@@ -96,21 +97,28 @@ describe("deployEntryFile", () => {
 });
 
 describe("the deployed artifact", () => {
-  it("answers config schema after being copied out on its own", () => {
-    const isolated = mkdtempSync(join(tmpdir(), "pu-artifact-"));
+  // The artifact carries its own code but no longer its libraries, so it is exercised
+  // the way a home actually holds it: the file beside the shared store the updater
+  // materialises. Copying it somewhere with neither is not a deployment.
+  it("answers config schema when deployed beside its shared libraries", () => {
+    const home = mkdtempSync(join(tmpdir(), "pu-artifact-"));
     try {
       const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { pluginEntry?: string };
       const artifact = join(process.cwd(), pkg.pluginEntry ?? "dist/index.js");
-      const copied = join(isolated, "plugin-updater.js");
-      writeFileSync(join(isolated, "package.json"), JSON.stringify({ type: "module" }), "utf8");
+      const pluginDir = join(home, "plugin");
+      mkdirSync(pluginDir, { recursive: true });
+      const copied = join(pluginDir, "plugin-updater.js");
+      writeFileSync(join(pluginDir, "package.json"), JSON.stringify({ type: "module" }), "utf8");
       copyFileSync(artifact, copied);
+      const shared = materializeLibraries(process.cwd(), home);
+      expect(shared.every((r) => r.status === "written")).toBe(true);
 
       const out = execFileSync(process.execPath, [copied, "config", "schema"], { encoding: "utf8" });
       const schema = JSON.parse(out.trim()) as { name: string; fields?: unknown[] };
       expect(schema.name).toBe("plugin-updater");
       expect(Array.isArray(schema.fields)).toBe(true);
     } finally {
-      rmSync(isolated, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
     }
   }, 30000);
 });

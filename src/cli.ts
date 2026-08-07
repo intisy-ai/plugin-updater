@@ -8,7 +8,7 @@ import os from "os";
 import { resolveInitApps, cwdApp, ensurePluginsJson, registerUpdaterWithApp, type PresentApps } from "./init.js";
 import { getAppConfigDir } from "./env.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { getApps } from "../lib/core.js";
+import { getApps } from "@intisy-ai/core";
 
 const UPDATER_NAME = "plugin-updater";
 

@@ -13,6 +13,9 @@ await build({
   format: "esm",
   target: "node20",
   logLevel: "info",
+  // Materialised once per home by this package itself, rather than carried by
+  // every plugin that uses it.
+  external: ["@intisy-ai/core"],
 });
 
 console.log("Bundled plugin-updater -> dist/plugin.js (deployed artifact)");

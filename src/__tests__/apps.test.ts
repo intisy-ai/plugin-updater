@@ -5,7 +5,7 @@ import { join } from "path";
 import { getAppConfigDir, getAppName } from "../env.js";
 import { customAppHome } from "../apps.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { registerApp, resolveHome, getAppDescriptor } from "../../lib/core.js";
+import { registerApp, resolveHome, getAppDescriptor } from "@intisy-ai/core";
 
 function tempHome() { return mkdtempSync(join(tmpdir(), "pu-apps-")); }
 

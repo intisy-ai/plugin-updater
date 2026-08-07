@@ -3,7 +3,7 @@ import path from "path";
 import os from "os";
 import { customAppHome } from "./apps.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { currentAppId } from "../lib/core.js";
+import { currentAppId } from "@intisy-ai/core";
 
 // set by earlyLaunch/direct-update so all path resolution targets that dir
 let earlyLaunchConfigDir: string | null = null;

@@ -1,6 +1,6 @@
 import os from "os";
 // @ts-ignore — generated bundle, no .d.ts
-import { getAppDescriptor, resolveHome } from "../lib/core.js";
+import { getAppDescriptor, resolveHome } from "@intisy-ai/core";
 
 // Looks an app up in the SHARED app registry (libs/core's apps.json, populated by a
 // loader's cairn.json `app` block on install — see index.ts's registerAppFromClone) and

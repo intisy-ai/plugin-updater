@@ -8,7 +8,7 @@ import { writeLog } from "./log.js";
 import { readOpencodeJson, writeOpencodeJson } from "./config.js";
 import type { NpmPlugin } from "./types.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { loadConfig } from "../lib/core.js";
+import { loadConfig } from "@intisy-ai/core";
 
 const execAsync = promisify(exec);
 

@@ -34,7 +34,7 @@ export async function precomputeRemoteHashes(
   return out;
 }
 // @ts-ignore — generated bundle, no .d.ts
-import { loadConfig } from "../lib/core.js";
+import { loadConfig } from "@intisy-ai/core";
 
 // Deployed clones must carry every dist their bundle references at runtime, since node_modules
 // and untracked submodule builds are not copied back.
