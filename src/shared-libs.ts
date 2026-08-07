@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getPluginDir } from "./env.js";
 
 // A library a plugin carries as a submodule and no longer inlines. The specifier
 // is what the plugin's built bundle imports; the store is where Node finds it.
@@ -11,8 +10,13 @@ export interface SharedLibrary {
 
 const SCOPE = "@intisy-ai";
 
+// The store sits at the HOME's root rather than inside the deployed-plugin directory:
+// Node resolves a bare specifier by walking up from the importing file, and two
+// consumers import from different depths. The deployed bundle sits at
+// <home>/plugin/<name>.js, while a provider's handler is loaded straight out of its
+// clone at <home>/repos/<name>/dist/. Only the home root is above both.
 export function sharedStoreDir(configDir: string): string {
-  return path.join(getPluginDir(configDir), "node_modules");
+  return path.join(configDir, "node_modules");
 }
 
 function submodulePaths(gitmodules: string): string[] {
@@ -65,10 +69,9 @@ export interface MaterializeResult {
   detail?: string;
 }
 
-// Places each library the clone declares into the home's shared store, so a
-// deployed bundle that imports it by name resolves through ordinary Node lookup
-// (which walks up from <configDir>/plugin/<name>.js and finds node_modules there).
-// The library's own dist is copied verbatim; nothing is rewritten.
+// Places each library the clone declares into the home's shared store, so anything
+// importing it by name resolves through ordinary Node lookup. The library's own dist
+// is copied verbatim; nothing is rewritten.
 export function materializeLibraries(
   sourceDir: string,
   configDir: string,

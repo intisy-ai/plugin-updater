@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import { declaredLibraries, materializeLibraries, sharedStoreDir } from "../shared-libs.js";
 
@@ -74,6 +75,25 @@ describe("materializeLibraries", () => {
       type: "module",
       main: "dist/index.js",
     });
+  });
+
+  // Node resolves a bare specifier by walking UP from the importing file. The deployed
+  // bundle sits at <home>/plugin/<name>.js and a provider's handler is loaded straight
+  // out of its clone at <home>/repos/<name>/dist/, so a store under plugin/ was
+  // invisible to the second and every provider failed to load. Both depths are
+  // exercised by really importing, in a real node process, rather than by comparing paths.
+  it("is resolvable from both a deployed bundle and a clone's handler", () => {
+    const sourceDir = makeClone({ core: { name: "core", dist: { "index.js": "export const marker = 'shared';\n" } } });
+    const configDir = join(workDir as string, "home");
+    materializeLibraries(sourceDir, configDir);
+
+    for (const importerDir of [join(configDir, "plugin"), join(configDir, "repos", "a-provider", "dist")]) {
+      mkdirSync(importerDir, { recursive: true });
+      const importer = join(importerDir, "entry.mjs");
+      writeFileSync(importer, "import { marker } from '@intisy-ai/core';\nconsole.log(marker);\n");
+      const out = execFileSync(process.execPath, [importer], { encoding: "utf8" }).trim();
+      expect(out).toBe("shared");
+    }
   });
 
   it("skips an unbuilt library instead of publishing an empty directory", () => {
