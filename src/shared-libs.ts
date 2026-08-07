@@ -65,8 +65,17 @@ function copyDirectory(from: string, to: string): void {
 
 export interface MaterializeResult {
   specifier: string;
-  status: "written" | "skipped";
+  status: "written" | "current" | "skipped";
   detail?: string;
+}
+
+function alreadyShared(target: string, version: string): boolean {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(target, "package.json"), "utf8")) as { version?: string };
+    return pkg.version === version && fs.existsSync(path.join(target, "dist"));
+  } catch {
+    return false;
+  }
 }
 
 // Places each library the clone declares into the home's shared store, so anything
@@ -98,6 +107,12 @@ export function materializeLibraries(
     } catch { /* the defaults above are correct for every library in this ecosystem */ }
 
     const target = path.join(sharedStoreDir(configDir), ...library.specifier.split("/"));
+    // Callers run this on every deploy so a home that predates the store still gets
+    // one, which means the common case is "already correct" and must not re-copy.
+    if (alreadyShared(target, version)) {
+      results.push({ specifier: library.specifier, status: "current", detail: version });
+      continue;
+    }
     try {
       fs.rmSync(target, { recursive: true, force: true });
       copyDirectory(dist, path.join(target, "dist"));

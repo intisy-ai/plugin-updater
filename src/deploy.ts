@@ -186,6 +186,12 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // ENOENT on the copy. Any already-deployed plugin/<name>.js stays in place.
   // Only touch the deployed file when something actually changed — the cleanup
   // imports the old module and the copy rewrites it, both pointless when unchanged.
+  // Outside the "did anything change" guard on purpose: a home installed before the
+  // libraries were shared has no store at all, and nothing about it changes, so
+  // gating this would leave every plugin there unable to resolve its imports
+  // forever. Re-running is cheap, since an up-to-date library is left alone.
+  materializeLibraries(sourceDir, configDir, writeLog);
+
   if (!nothingToDeploy) {
     if (!fs.existsSync(deploySource)) {
       writeLog(`Skipping deploy for ${pluginName}: built file not found at ${deploySource}`, true);
@@ -199,9 +205,6 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
       const pkgMarker = path.join(executionPath, "package.json");
       if (!fs.existsSync(pkgMarker)) fs.writeFileSync(pkgMarker, JSON.stringify({ type: "module" }, null, 2), "utf8");
     } catch { /* non-fatal */ }
-    // Before the bundle lands, so a plugin that imports its libraries by name
-    // instead of inlining them can resolve them the moment it is first loaded.
-    materializeLibraries(sourceDir, configDir, writeLog);
     await callPluginCleanup(pluginExecutionFile, configDir);
     try {
       writeLog(`Running copy for ${pluginName}`);
