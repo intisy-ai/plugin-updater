@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
-// @ts-ignore — generated bundle, no .d.ts
-import { defineConfig, defineCapabilities, getConfigDefaults, getCapabilities } from "../lib/core.js";
+import { defineConfig, defineCapabilities, getConfigDefaults, getCapabilities } from "@intisy-ai/core";
+import type { ActionSpec, FieldSpec, MenuSpec } from "@intisy-ai/core";
 
 export const UPDATER_NAME = "plugin-updater";
 
@@ -57,16 +57,13 @@ export function readUpdaterConfig(configDir: string): Record<string, unknown> {
   return {};
 }
 
-// The declaration types live in core, which this plugin consumes as an untyped bundle,
-// so fields and actions pass through as the data they are; only the menu, which callers
-// branch on, is spelled out.
 export interface UpdaterSchema {
   plugin: string;
   defaults: Record<string, unknown>;
   current: Record<string, unknown>;
-  fields?: Record<string, unknown>[];
-  actions?: Record<string, unknown>[];
-  menu?: { label: string; glyph?: string; order?: number };
+  fields?: FieldSpec[];
+  actions?: ActionSpec[];
+  menu?: MenuSpec;
 }
 
 // The same shape `node <bundle> config schema` prints, for a caller that holds this

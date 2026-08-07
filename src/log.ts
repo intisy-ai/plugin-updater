@@ -5,7 +5,7 @@
 import { getAppConfigDir, getAppName } from "./env.js";
 // @ts-ignore — generated bundle (core, esbuild-bundled to lib/ so it ships in the
 // npm tarball; the submodule's own core/dist is gitignored and never published)
-import { makeWriteLog } from "../lib/core.js";
+import { makeWriteLog } from "@intisy-ai/core";
 
 export const writeLog: (message: string, isError?: boolean) => void =
   makeWriteLog("plugin-updater", getAppConfigDir(getAppName()));

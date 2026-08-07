@@ -1,6 +1,6 @@
 {
   "name": "plugin-updater",
-  "version": "1.5.10",
+  "version": "1.11.1",
   "description": "Plugin lifecycle manager for OpenCode and Claude Code launchers",
   "type": "module",
   "main": "dist/index.js",
@@ -23,7 +23,6 @@
   ],
   "files": [
     "dist/",
-    "lib/",
     "README.md",
     "LICENSE"
   ],
@@ -31,7 +30,7 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "npx esbuild core/src/index.ts --bundle --platform=node --format=esm --outfile=lib/core.js && tsc && node build.mjs",
+    "build": "tsc && node build.mjs",
     "postbuild": "node dist/index.js readme",
     "test": "npm run build && vitest run",
     "prepublishOnly": "npm run build"
@@ -41,5 +40,8 @@
     "@types/node": "^22.0.0",
     "typescript": "^5.0.0",
     "vitest": "^3.2.6"
+  },
+  "dependencies": {
+    "@intisy-ai/core": "file:core"
   }
 }

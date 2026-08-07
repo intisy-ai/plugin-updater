@@ -8,7 +8,7 @@
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import fs from "fs";
-import { runConfigCli, runAllConfigCli, deployCommands, getAppConfigDir as coreGetAppConfigDir } from "../lib/core.js";
+import { runConfigCli, runAllConfigCli, deployCommands, getAppConfigDir as coreGetAppConfigDir } from "@intisy-ai/core";
 import { getPlugins } from "./config.js";
 
 const PLUGIN = "plugin-updater";

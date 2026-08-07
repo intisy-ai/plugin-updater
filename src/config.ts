@@ -4,7 +4,7 @@ import { isOpencodeHookInvocation } from "./env.js";
 import { writeLog } from "./log.js";
 import type { Plugin } from "./types.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { getApps } from "../lib/core.js";
+import { getApps } from "@intisy-ai/core";
 
 // Which registered app a config dir belongs to, matched by the app id appearing as a
 // path segment (e.g. ".claude" -> "claude", ".config/opencode" -> "opencode"). Returns
