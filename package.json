@@ -1,6 +1,6 @@
 {
   "name": "plugin-updater",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "description": "Plugin lifecycle manager for OpenCode and Claude Code launchers",
   "type": "module",
   "main": "dist/index.js",
@@ -30,10 +30,11 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "tsc && node build.mjs",
+    "build": "npm run build:deps && tsc && node build.mjs",
     "postbuild": "node dist/index.js readme",
     "test": "npm run build && vitest run",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "build:deps": "npm --prefix core install && npm --prefix core run build"
   },
   "devDependencies": {
     "esbuild": "^0.25.12",
