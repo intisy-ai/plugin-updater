@@ -140,6 +140,9 @@ function pruneOrphans(configDir: string, plugins: Plugin[]): void {
   try {
     for (const dir of fs.readdirSync(path.join(configDir, "repos"))) {
       if (!keep.has(dir)) {
+        // Said before the removal, not only after: a clone carries its node_modules, so this
+        // is the slow part of an uninstall and the only one worth watching.
+        writeLog(`Removing repos/${dir}`);
         try { fs.rmSync(path.join(configDir, "repos", dir), { recursive: true, force: true }); writeLog(`Pruned orphaned repos/${dir}`); } catch { /* ignore */ }
       }
     }
