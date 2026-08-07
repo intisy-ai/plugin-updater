@@ -61,12 +61,24 @@ function getBuildTimeoutMs(): number {
   return seconds * 1000;
 }
 
+// A host driving an install can show real transfer progress, but only if git streams it:
+// git stays silent on a non-TTY unless asked, and the default capture holds stderr back for
+// the error log. Opt in and stderr is inherited instead, so the host sees it live.
+export function gitProgressStreaming(): boolean {
+  return (process.env.PLUGIN_UPDATER_GIT_PROGRESS || "").trim() === "1";
+}
+
+export function gitProgressFlag(): string {
+  return gitProgressStreaming() ? " --progress" : "";
+}
+
 export function executeGit(command: string, cwd: string): boolean {
   writeLog(`Executing git: ${command} in ${cwd}`);
   try {
     execSync(command, {
+      windowsHide: true,
       cwd,
-      stdio: "pipe",
+      stdio: gitProgressStreaming() ? ["ignore", "pipe", "inherit"] : "pipe",
       timeout: getGitTimeoutMs(),
       env: { ...process.env, GCM_INTERACTIVE: "never", GIT_TERMINAL_PROMPT: "0" },
     });
@@ -95,7 +107,7 @@ export function updatePlugin(
   if (!fs.existsSync(targetDir)) {
     if (!fs.existsSync(reposDir)) fs.mkdirSync(reposDir, { recursive: true });
     const branchFlag = branch ? `--branch ${branch}` : "";
-    const cloned = executeGit(`git clone --recurse-submodules ${branchFlag} ${gitUrl} ${pluginName}`, reposDir);
+    const cloned = executeGit(`git clone --recurse-submodules${gitProgressFlag()} ${branchFlag} ${gitUrl} ${pluginName}`, reposDir);
     if (!cloned) return { success: false, changed: false };
     fs.writeFileSync(lastCheckFile, Date.now().toString());
     didChange = true;
@@ -119,8 +131,8 @@ export function updatePlugin(
           // added after the pre-pass).
           const remoteHash = remoteHashHint !== undefined
             ? remoteHashHint
-            : (execSync(`git ls-remote origin ${ref}`, { cwd: targetDir }).toString().trim().split(/\s+/)[0] || "");
-          const localHash = execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim();
+            : (execSync(`git ls-remote origin ${ref}`, { windowsHide: true, cwd: targetDir }).toString().trim().split(/\s+/)[0] || "");
+          const localHash = execSync("git rev-parse HEAD", { windowsHide: true, cwd: targetDir }).toString().trim();
           remoteMoved = !!remoteHash && !!localHash && remoteHash !== localHash;
         } catch { /* offline / transient — fall back to skipping until the interval */ }
       }
@@ -141,10 +153,10 @@ export function updatePlugin(
     }
 
     fs.writeFileSync(lastCheckFile, Date.now().toString());
-    executeGit("git fetch origin", targetDir);
+    executeGit(`git fetch origin${gitProgressFlag()}`, targetDir);
 
     let beforeHash = "";
-    try { beforeHash = execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim(); } catch { /* ignore */ }
+    try { beforeHash = execSync("git rev-parse HEAD", { windowsHide: true, cwd: targetDir }).toString().trim(); } catch { /* ignore */ }
 
     if (commitHash) {
       executeGit(`git checkout ${commitHash}`, targetDir);
@@ -154,7 +166,7 @@ export function updatePlugin(
     } else {
       // the updater owns repos/: hard-sync to the remote so force-pushed
       // branches and rewritten submodule history cannot strand the clone
-      executeGit("git fetch origin", targetDir);
+      executeGit(`git fetch origin${gitProgressFlag()}`, targetDir);
       executeGit("git checkout main || git checkout master", targetDir);
       executeGit("git reset --hard @{upstream}", targetDir);
     }
@@ -164,13 +176,13 @@ export function updatePlugin(
       writeLog(`Submodule sync failed for ${pluginName}, recloning`, true);
       try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch { /* ignore */ }
       const recloneBranchFlag = branch ? `--branch ${branch}` : "";
-      executeGit(`git clone --recurse-submodules ${recloneBranchFlag} ${gitUrl} ${pluginName}`, reposDir);
+      executeGit(`git clone --recurse-submodules${gitProgressFlag()} ${recloneBranchFlag} ${gitUrl} ${pluginName}`, reposDir);
       fs.writeFileSync(lastCheckFile, Date.now().toString());
       didChange = true;
     }
 
     let afterHash = "";
-    try { afterHash = execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim(); } catch { /* ignore */ }
+    try { afterHash = execSync("git rev-parse HEAD", { windowsHide: true, cwd: targetDir }).toString().trim(); } catch { /* ignore */ }
 
     if (beforeHash !== afterHash) didChange = true;
   }
@@ -182,9 +194,56 @@ export function getLocalHead(pluginName: string): string | null {
   const targetDir = path.join(getReposDir(), pluginName);
   if (!fs.existsSync(targetDir)) return null;
   try {
-    return execSync("git rev-parse HEAD", { cwd: targetDir }).toString().trim() || null;
+    return execSync("git rev-parse HEAD", { windowsHide: true, cwd: targetDir }).toString().trim() || null;
   } catch {
     return null;
+  }
+}
+
+const COPY_RETRIES = 12;
+const COPY_RETRY_DELAY_MS = 250;
+
+function copyFileWithRetry(from: string, to: string): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.copyFileSync(from, to);
+      return;
+    } catch (e: unknown) {
+      // On Windows a file a running process has open cannot be overwritten. A handler
+      // another process imported is exactly that, so wait for it to let go rather than
+      // leaving the built artifact behind.
+      const code = (e as { code?: string }).code;
+      if (attempt >= COPY_RETRIES || (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES")) throw e;
+      sleepSync(COPY_RETRY_DELAY_MS);
+    }
+  }
+}
+
+function sleepSync(ms: number): void {
+  const until = Date.now() + ms;
+  while (Date.now() < until) { /* the build is synchronous throughout; nothing to yield to */ }
+}
+
+// One file at a time, so a single locked artifact cannot abandon the rest of the tree
+// half-copied the way a recursive copy does.
+function copyTree(from: string, to: string, pluginName: string): void {
+  fs.mkdirSync(to, { recursive: true });
+  const failures: string[] = [];
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const source = path.join(from, entry.name);
+    const target = path.join(to, entry.name);
+    if (entry.isDirectory()) {
+      copyTree(source, target, pluginName);
+      continue;
+    }
+    try {
+      copyFileWithRetry(source, target);
+    } catch (e: unknown) {
+      failures.push(`${entry.name} (${(e as { message: string }).message})`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`could not write ${failures.length} built file(s) for ${pluginName}: ${failures.join(", ")}`);
   }
 }
 
@@ -204,12 +263,12 @@ export function buildInTempDir(pluginName: string, sourceDir: string): void {
 
     const buildTimeoutMs = getBuildTimeoutMs();
     writeLog(`Running npm install for ${pluginName}`);
-    execSync("npm install", { cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
+    execSync("npm install", { windowsHide: true, cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
     writeLog(`Finished npm install for ${pluginName}`);
 
     const pkg = JSON.parse(fs.readFileSync(path.join(tempDir, "package.json"), "utf8")) as { scripts?: { build?: string } };
     if (pkg.scripts?.build) {
-      execSync("npm run build", { cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
+      execSync("npm run build", { windowsHide: true, cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
       writeLog(`Finished npm run build for ${pluginName}`);
     } else {
       writeLog(`Skipped npm run build for ${pluginName} (no build script found)`);
@@ -218,7 +277,7 @@ export function buildInTempDir(pluginName: string, sourceDir: string): void {
     for (const outputDir of BUILD_OUTPUT_DIRS) {
       const builtDir = path.join(tempDir, outputDir);
       if (fs.existsSync(builtDir)) {
-        fs.cpSync(builtDir, path.join(sourceDir, outputDir), { recursive: true });
+        copyTree(builtDir, path.join(sourceDir, outputDir), pluginName);
       }
     }
   } finally {

@@ -10,7 +10,7 @@ import { startDeclaredDaemon } from "./daemon.js";
 // The clone's current commit, used to tie a deployed artifact to the source it was
 // built from (self-heals a stale deploy left by an earlier interrupted pass).
 function repoHead(dir: string): string {
-  try { return execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf8" }).trim(); } catch { return ""; }
+  try { return execSync("git rev-parse HEAD", { windowsHide: true, cwd: dir, encoding: "utf8" }).trim(); } catch { return ""; }
 }
 
 // A loader plugin self-describes as one via cairn.json's `app.loader.id` (see
@@ -80,6 +80,25 @@ function applyClaudeManifest(sourceDir: string, configDir: string, pluginName: s
   }
 }
 
+// Files the clone's own package.json says it ships but that the build did not produce. A
+// plugin's main entry landing is not proof the build finished: a provider also declares
+// handlers, and a clone missing one still loads while its accounts and routing do not
+// work. Returned relative to the clone so the caller can name them.
+export function missingDeclaredArtifacts(sourceDir: string, packageJsonPath: string): string[] {
+  let pkg: { main?: string; pluginEntry?: string; claudeHub?: { authProviders?: Array<{ handler?: string }> }; authProviders?: Array<{ handler?: string }> };
+  try {
+    pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  } catch {
+    return [];
+  }
+  const declared = [
+    pkg.main,
+    pkg.pluginEntry,
+    ...(pkg.claudeHub?.authProviders ?? pkg.authProviders ?? []).map((p) => p.handler),
+  ].filter((f): f is string => typeof f === "string" && f.length > 0);
+  return [...new Set(declared)].filter((file) => !fs.existsSync(path.join(sourceDir, file)));
+}
+
 export async function deployToExecutionDir(pluginName: string, executionPath: string, changed: boolean, configDir: string): Promise<boolean> {
   const sourceDir = path.join(getReposDir(), pluginName);
   if (!fs.existsSync(sourceDir)) return false;
@@ -100,11 +119,18 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   try { deployedSha = fs.readFileSync(deployedShaFile, "utf8").trim(); } catch { /* never deployed / pre-sha install */ }
   const artifactStale = head !== "" && head !== deployedSha;
   if (artifactStale && deployedExists) writeLog(`Deployed ${pluginName} is stale (HEAD ${head.slice(0, 7)} != deployed ${deployedSha.slice(0, 7) || "none"}) — forcing redeploy`);
+  // A clone can sit at the right commit with the right deployed entry and still be missing
+  // another artifact its package.json declares, because a copy of that one file failed (on
+  // Windows, a handler another process holds open cannot be overwritten). Check for that
+  // here too, or the fast path below skips the only thing that would repair it.
+  const incomplete = missingDeclaredArtifacts(sourceDir, packageJsonPath);
+  if (incomplete.length > 0) writeLog(`Deployed ${pluginName} is missing ${incomplete.join(", ")} — forcing rebuild`, true);
   // Fast path: nothing changed, the deployed file is in place, AND it matches the clone's
   // HEAD. Skips the build/install AND (below) the copy + plugin re-import + re-activate,
   // which otherwise cost ~1s+ per plugin on EVERY launch and blocked startup.
-  const nothingToDeploy = !changed && deployedExists && !artifactStale;
+  const nothingToDeploy = !changed && deployedExists && !artifactStale && incomplete.length === 0;
 
+  let buildComplete = true;
   if (nothingToDeploy) {
     writeLog(`Skipping install/build for ${pluginName} (no changes and deployed file exists)`);
   } else if (fs.existsSync(packageJsonPath)) {
@@ -113,7 +139,7 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
       const runtimeDeps = (JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as { dependencies?: Record<string, string> }).dependencies;
       if (runtimeDeps && Object.keys(runtimeDeps).length > 0) {
         writeLog(`Installing runtime dependencies for ${pluginName}`);
-        execSync("npm install --omit=dev", { cwd: sourceDir, stdio: "pipe" });
+        execSync("npm install --omit=dev", { windowsHide: true, cwd: sourceDir, stdio: "pipe" });
         writeLog(`Finished runtime dependencies for ${pluginName}`);
       }
     } catch (error: unknown) {
@@ -123,6 +149,12 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
       writeLog(`Build/Install failed for ${pluginName}: ${err.message}`, true);
       if (stderr) writeLog(`npm stderr: ${stderr}`, true);
       if (stdout) writeLog(`npm stdout: ${stdout}`, true);
+      buildComplete = false;
+    }
+    const missing = missingDeclaredArtifacts(sourceDir, packageJsonPath);
+    if (missing.length > 0) {
+      writeLog(`Build for ${pluginName} left ${missing.join(", ")} missing; will rebuild on the next run`, true);
+      buildComplete = false;
     }
   }
 
@@ -172,7 +204,9 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
       fs.copyFileSync(deploySource, pluginExecutionFile);
       // Stamp the commit this artifact was built from AFTER a successful copy, so a
       // later pass can tell whether the deployed file is current (see artifactStale).
-      try { if (head) fs.writeFileSync(deployedShaFile, head, "utf8"); } catch { /* non-fatal */ }
+      // Only when the build really landed: stamping over a half-built clone is what
+      // makes the fast path skip it forever instead of retrying.
+      try { if (head && buildComplete) fs.writeFileSync(deployedShaFile, head, "utf8"); } catch { /* non-fatal */ }
       writeLog(`Finished copy for ${pluginName}`);
     } catch (e: unknown) {
       writeLog(`Copy failed for ${pluginName}: ${(e as { message: string }).message}`, true);
