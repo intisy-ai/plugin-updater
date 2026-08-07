@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
 import { writeLog } from "./log.js";
+import { getReposDir } from "./env.js";
 
 // sync-bridge is the only component allowed to span both app homes, so the
 // cross-app plugin-list merge lives there. It ships its in-process API as a
@@ -10,7 +11,7 @@ import { writeLog } from "./log.js";
 // where plugin-updater itself deploys git plugins.
 function resolveSyncBridgeLib(configDir: string): string | null {
   const candidates = [
-    path.join(configDir, "repos", "sync-bridge", "dist", "lib.js"),
+    path.join(getReposDir(configDir), "sync-bridge", "dist", "lib.js"),
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) return candidate;

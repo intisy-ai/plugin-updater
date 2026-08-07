@@ -3,7 +3,7 @@ import path from "path";
 import os from "os";
 import { execSync, exec } from "child_process";
 import { promisify } from "util";
-import { isOpencodeHookInvocation } from "./env.js";
+import { isOpencodeHookInvocation, getCacheDir } from "./env.js";
 import { writeLog } from "./log.js";
 import { readOpencodeJson, writeOpencodeJson } from "./config.js";
 import type { NpmPlugin } from "./types.js";
@@ -63,7 +63,7 @@ export function resolveNpmPluginVersion(name: string, configDir: string): string
         }
       }
     }
-    const cacheDir = path.join(configDir, "cache", "node_modules");
+    const cacheDir = path.join(getCacheDir(configDir), "node_modules");
     const globalNpm = getNpmGlobalRoot();
     const candidates = [
       path.join(cacheDir, name, "package.json"),
@@ -135,10 +135,10 @@ export function uninstallNpmPlugin(name: string, configDir: string): string {
 export function updateNpmPlugin(name: string, configDir: string, updateInterval = 1): string {
   if (isOpencodeHookInvocation(name)) return "";
   writeLog(`Updating npm plugin: ${name}`);
-  const checkFile = path.join(configDir, "cache", `.npm-lastcheck-${name.replace(/[^a-z0-9]/gi, "_")}`);
+  const checkFile = path.join(getCacheDir(configDir), `.npm-lastcheck-${name.replace(/[^a-z0-9]/gi, "_")}`);
   try {
-    if (!fs.existsSync(path.join(configDir, "cache"))) {
-      fs.mkdirSync(path.join(configDir, "cache"), { recursive: true });
+    if (!fs.existsSync(getCacheDir(configDir))) {
+      fs.mkdirSync(getCacheDir(configDir), { recursive: true });
     }
     const lastCheck = fs.existsSync(checkFile)
       ? parseInt(fs.readFileSync(checkFile, "utf8"), 10)

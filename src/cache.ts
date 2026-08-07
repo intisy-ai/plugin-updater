@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { writeLog } from "./log.js";
+import { getCacheDir } from "./env.js";
 
 // Single source of truth for update state, read by the loader TUI to render the
 // installed-plugins view synchronously (see the cache contract in the SP-E spec).
@@ -20,7 +21,7 @@ export interface UpdateCache {
 }
 
 export function getCachePath(configDir: string): string {
-  return path.join(configDir, "cache", "plugin-updates.json");
+  return path.join(getCacheDir(configDir), "plugin-updates.json");
 }
 
 // Best-effort read of the PREVIOUS cache — used only to carry forward `updatedAt`
@@ -36,7 +37,7 @@ export function readUpdateCache(configDir: string): UpdateCache {
 // Best-effort write — this cache is a display aid for the loader TUI, never load-bearing.
 export function writeUpdateCache(configDir: string, cache: UpdateCache): void {
   try {
-    const dir = path.join(configDir, "cache");
+    const dir = getCacheDir(configDir);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(getCachePath(configDir), JSON.stringify(cache, null, 2), "utf8");
   } catch (e: unknown) {

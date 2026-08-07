@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { getPluginDir } from "./env.js";
 
 // A library a plugin carries as a submodule and no longer inlines. The specifier
 // is what the plugin's built bundle imports; the store is where Node finds it.
@@ -11,7 +12,7 @@ export interface SharedLibrary {
 const SCOPE = "@intisy-ai";
 
 export function sharedStoreDir(configDir: string): string {
-  return path.join(configDir, "plugin", "node_modules");
+  return path.join(getPluginDir(configDir), "node_modules");
 }
 
 function submodulePaths(gitmodules: string): string[] {

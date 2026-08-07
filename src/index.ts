@@ -1,4 +1,4 @@
-import { getAppConfigDir, getAppName, getReposDir, isOpencodeHookInvocation, setEarlyLaunchConfigDir } from "./env.js";
+import { getAppConfigDir, getAppName, getReposDir, isOpencodeHookInvocation, setEarlyLaunchConfigDir, getPluginDir } from "./env.js";
 import { writeLog } from "./log.js";
 import { getPlugins, getPluginsPath, readOpencodeJson, setPluginCommitHash } from "./config.js";
 import { selfUpdate, updateNpmPlugin, resolveNpmPluginVersion } from "./npm.js";
@@ -139,20 +139,20 @@ if (await maybeRunCli()) {
 function pruneOrphans(configDir: string, plugins: Plugin[]): void {
   const keep = new Set(plugins.map((p) => p.name));
   try {
-    for (const dir of fs.readdirSync(path.join(configDir, "repos"))) {
+    for (const dir of fs.readdirSync(getReposDir(configDir))) {
       if (!keep.has(dir)) {
         // Said before the removal, not only after: a clone carries its node_modules, so this
         // is the slow part of an uninstall and the only one worth watching.
         writeLog(`Removing repos/${dir}`);
-        try { fs.rmSync(path.join(configDir, "repos", dir), { recursive: true, force: true }); writeLog(`Pruned orphaned repos/${dir}`); } catch { /* ignore */ }
+        try { fs.rmSync(path.join(getReposDir(configDir), dir), { recursive: true, force: true }); writeLog(`Pruned orphaned repos/${dir}`); } catch { /* ignore */ }
       }
     }
   } catch { /* no repos dir */ }
   try {
-    for (const file of fs.readdirSync(path.join(configDir, "plugin"))) {
+    for (const file of fs.readdirSync(getPluginDir(configDir))) {
       if (!file.endsWith(".js")) continue;
       if (!keep.has(file.slice(0, -3))) {
-        try { fs.unlinkSync(path.join(configDir, "plugin", file)); writeLog(`Pruned orphaned plugin/${file}`); } catch { /* ignore */ }
+        try { fs.unlinkSync(path.join(getPluginDir(configDir), file)); writeLog(`Pruned orphaned plugin/${file}`); } catch { /* ignore */ }
       }
     }
   } catch { /* no plugin dir */ }
@@ -210,7 +210,7 @@ export async function updatePluginPublic(
   if (isOpencodeHookInvocation(pluginName)) return {};
   writeLog(`Public API update call for ${pluginName}`);
   const configDir = getAppConfigDir(getAppName());
-  const repoDir = path.join(configDir, "repos", pluginName);
+  const repoDir = path.join(getReposDir(configDir), pluginName);
   const previousVersion = fs.existsSync(repoDir) ? getLocalHead(pluginName) : null;
   // interval 0: an explicit update request must never fast-path-skip
   const result = updatePlugin(pluginName, gitUrl, branch, commitHash ?? null, 0);
@@ -223,7 +223,7 @@ export async function updatePluginPublic(
   // a plain "Update now" (no commitHash) clears any earlier pin so it can move past it
   if (commitHash) setPluginCommitHash(configDir, pluginName, commitHash);
   else setPluginCommitHash(configDir, pluginName, null);
-  await deployToExecutionDir(pluginName, path.join(configDir, "plugin"), result.changed, configDir);
+  await deployToExecutionDir(pluginName, getPluginDir(configDir), result.changed, configDir);
   if (result.changed) onInstalled(pluginName, getLocalHead(pluginName), previousVersion, "manual");
   else registerAppFromClone(pluginName);
 }

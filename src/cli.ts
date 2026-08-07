@@ -6,7 +6,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { resolveInitApps, cwdApp, ensurePluginsJson, registerUpdaterWithApp, type PresentApps } from "./init.js";
-import { getAppConfigDir } from "./env.js";
+import { getAppConfigDir, getReposDir, getPluginDir } from "./env.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { getApps } from "@intisy-ai/core";
 
@@ -217,8 +217,8 @@ async function main(): Promise<void> {
     for (const arg of parsed.urls) {
       const name = arg.replace(/\.git$/, "").split("/").pop() ?? arg;
       removePluginEntry(configDir, name);
-      try { fs.rmSync(path.join(configDir, "repos", name), { recursive: true, force: true }); } catch { /* ignore */ }
-      try { fs.rmSync(path.join(configDir, "plugin", `${name}.js`), { force: true }); } catch { /* ignore */ }
+      try { fs.rmSync(path.join(getReposDir(configDir), name), { recursive: true, force: true }); } catch { /* ignore */ }
+      try { fs.rmSync(path.join(getPluginDir(configDir), `${name}.js`), { force: true }); } catch { /* ignore */ }
       console.log(`Removed ${name}`);
     }
   } else {
