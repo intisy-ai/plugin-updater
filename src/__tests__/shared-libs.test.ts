@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
-import { declaredLibraries, materializeLibraries, sharedStoreDir } from "../shared-libs.js";
+import { declaredLibraries, materializeLibraries, sharedStoreDir, unbuiltLibraries } from "../shared-libs.js";
 
 let workDir: string | undefined;
 afterEach(() => {
@@ -127,5 +127,30 @@ describe("materializeLibraries", () => {
 
     const target = join(sharedStoreDir(configDir), "@intisy-ai", "core");
     expect(readFileSync(join(target, "dist", "generated", "teavm.js"), "utf8")).toBe("nested");
+  });
+});
+
+// A home whose clones predate a library becoming shared never repaired itself: the deploy fast
+// path skipped the build because the deployed file was already there, so the library's dist was
+// never produced, so materialising it was skipped forever and the provider could not load.
+describe("unbuiltLibraries", () => {
+  it("names a declared library that has no build output", () => {
+    const sourceDir = makeClone({
+      core: { name: "core", dist: { "index.js": "x" } },
+      "core-auth": { name: "core-auth" },
+    });
+    expect(unbuiltLibraries(sourceDir).map((l) => l.specifier)).toEqual(["@intisy-ai/core-auth"]);
+  });
+
+  it("is empty once every declared library is built", () => {
+    const sourceDir = makeClone({
+      core: { name: "core", dist: { "index.js": "x" } },
+      "core-auth": { name: "core-auth", dist: { "index.js": "y" } },
+    });
+    expect(unbuiltLibraries(sourceDir)).toEqual([]);
+  });
+
+  it("is empty for a clone that declares no libraries", () => {
+    expect(unbuiltLibraries(makeClone({}))).toEqual([]);
   });
 });

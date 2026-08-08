@@ -53,6 +53,13 @@ export function declaredLibraries(sourceDir: string): SharedLibrary[] {
   return libraries;
 }
 
+// A declared library with no build output cannot be put in a home's store, so any plugin
+// importing it by name fails to load. Callers use this to refuse the deploy fast path: only a
+// build produces the dist, and skipping the build is what leaves the home unable to repair itself.
+export function unbuiltLibraries(sourceDir: string): SharedLibrary[] {
+  return declaredLibraries(sourceDir).filter((library) => !fs.existsSync(path.join(library.dir, "dist")));
+}
+
 function copyDirectory(from: string, to: string): void {
   fs.mkdirSync(to, { recursive: true });
   for (const entry of fs.readdirSync(from, { withFileTypes: true })) {

@@ -6,7 +6,7 @@ import { getAppName, getReposDir } from "./env.js";
 import { writeLog } from "./log.js";
 import { buildInTempDir } from "./git.js";
 import { startDeclaredDaemon } from "./daemon.js";
-import { materializeLibraries } from "./shared-libs.js";
+import { materializeLibraries, unbuiltLibraries } from "./shared-libs.js";
 
 // The clone's current commit, used to tie a deployed artifact to the source it was
 // built from (self-heals a stale deploy left by an earlier interrupted pass).
@@ -129,7 +129,12 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // Fast path: nothing changed, the deployed file is in place, AND it matches the clone's
   // HEAD. Skips the build/install AND (below) the copy + plugin re-import + re-activate,
   // which otherwise cost ~1s+ per plugin on EVERY launch and blocked startup.
-  const nothingToDeploy = !changed && deployedExists && !artifactStale && incomplete.length === 0;
+  // A library the clone declares but never built cannot be put in the home's store, so the
+  // plugin that imports it by name fails to load. Only a build produces it, and the fast path
+  // is what skips that build, which is why such a home never repaired itself on any launch.
+  const unbuilt = unbuiltLibraries(sourceDir);
+  if (unbuilt.length > 0) writeLog(`${pluginName} declares ${unbuilt.map((l) => l.specifier).join(", ")} with no build output — forcing rebuild`, true);
+  const nothingToDeploy = !changed && deployedExists && !artifactStale && incomplete.length === 0 && unbuilt.length === 0;
 
   let buildComplete = true;
   if (nothingToDeploy) {
