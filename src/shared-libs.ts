@@ -19,6 +19,14 @@ export function sharedStoreDir(configDir: string): string {
   return path.join(configDir, "node_modules");
 }
 
+function readGitmodules(dir: string): string {
+  try {
+    return fs.readFileSync(path.join(dir, ".gitmodules"), "utf8");
+  } catch {
+    return "";
+  }
+}
+
 function submodulePaths(gitmodules: string): string[] {
   return gitmodules
     .split("\n")
@@ -26,20 +34,25 @@ function submodulePaths(gitmodules: string): string[] {
     .filter((value): value is string => Boolean(value));
 }
 
+// Every submodule under a clone, nested ones included, as paths relative to it. A library
+// can itself carry libraries (core-proxy nests core-ir), and each has its own build output,
+// so anything reasoning about "what this clone builds" has to see the whole tree.
+export function submoduleTree(sourceDir: string, relative = ""): string[] {
+  const found: string[] = [];
+  for (const child of submodulePaths(readGitmodules(path.join(sourceDir, relative)))) {
+    const childPath = relative ? path.join(relative, child) : child;
+    found.push(childPath, ...submoduleTree(sourceDir, childPath));
+  }
+  return found;
+}
+
 // The library set comes from the clone's own .gitmodules and each submodule's
 // package name, never from a list here: adding a library is then a submodule and
 // nothing else. A submodule without a usable package.json is skipped rather than
 // guessed at, since its specifier would be a fabrication.
 export function declaredLibraries(sourceDir: string): SharedLibrary[] {
-  let gitmodules: string;
-  try {
-    gitmodules = fs.readFileSync(path.join(sourceDir, ".gitmodules"), "utf8");
-  } catch {
-    return [];
-  }
-
   const libraries: SharedLibrary[] = [];
-  for (const relative of submodulePaths(gitmodules)) {
+  for (const relative of submodulePaths(readGitmodules(sourceDir))) {
     const dir = path.join(sourceDir, relative);
     let name: unknown;
     try {

@@ -177,51 +177,55 @@ describe("missingDeclaredArtifacts", () => {
     expect(missingDeclaredArtifacts(sourceDir, join(sourceDir, "package.json"))).toEqual([]);
   });
 
-  function writeLinkedLibrary(dir: string, main: string, built: boolean): void {
-    mkdirSync(join(sourceDir, dir, "dist"), { recursive: true });
-    writeFileSync(join(sourceDir, dir, "package.json"), JSON.stringify({ name: dir, main }));
-    if (built) writeFileSync(join(sourceDir, dir, main), "");
+  // The library set comes from .gitmodules, the same source shared-libs uses, so a test that
+  // seeds a library has to declare it as a submodule the way a real clone does.
+  function writeLibrarySubmodule(dir: string, packageName: string, built: boolean): void {
+    writeFileSync(join(sourceDir, ".gitmodules"), `[submodule "${dir}"]\n\tpath = ${dir}\n\turl = https://example/${dir}\n`);
+    mkdirSync(join(sourceDir, dir), { recursive: true });
+    writeFileSync(join(sourceDir, dir, "package.json"), JSON.stringify({ name: packageName, main: "dist/index.js" }));
+    if (built) {
+      mkdirSync(join(sourceDir, dir, "dist"), { recursive: true });
+      writeFileSync(join(sourceDir, dir, "dist", "index.js"), "");
+    }
   }
-
-  const linkedPkg = { ...providerPkg, dependencies: { "@intisy-ai/core-auth": "file:core-auth" } };
 
   function writeShippedFiles(handlerSource: string): void {
     writeFileSync(join(sourceDir, "dist", "index.js"), "");
     writeFileSync(join(sourceDir, "dist", "handler.js"), handlerSource);
   }
 
-  it("names an unbuilt file: library the shipped handler still imports by name", () => {
-    const pkgPath = writePkg(linkedPkg);
+  it("names an unbuilt library the shipped handler still imports by name", () => {
+    const pkgPath = writePkg(providerPkg);
     writeShippedFiles(`import { listAccounts } from "@intisy-ai/core-auth";`);
-    writeLinkedLibrary("core-auth", "dist/index.js", false);
-    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual(["core-auth/dist/index.js"]);
+    writeLibrarySubmodule("core-auth", "@intisy-ai/core-auth", false);
+    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual(["core-auth/dist"]);
   });
 
   it("names it for a deep import of the same library", () => {
-    const pkgPath = writePkg(linkedPkg);
+    const pkgPath = writePkg(providerPkg);
     writeShippedFiles(`import { listAccounts } from "@intisy-ai/core-auth/dist/accounts.js";`);
-    writeLinkedLibrary("core-auth", "dist/index.js", false);
-    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual(["core-auth/dist/index.js"]);
+    writeLibrarySubmodule("core-auth", "@intisy-ai/core-auth", false);
+    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual(["core-auth/dist"]);
   });
 
-  it("reports nothing once the file: library is built too", () => {
-    const pkgPath = writePkg(linkedPkg);
+  it("reports nothing once the library is built too", () => {
+    const pkgPath = writePkg(providerPkg);
     writeShippedFiles(`import { listAccounts } from "@intisy-ai/core-auth";`);
-    writeLinkedLibrary("core-auth", "dist/index.js", true);
+    writeLibrarySubmodule("core-auth", "@intisy-ai/core-auth", true);
     expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual([]);
   });
 
   // A plugin that inlines its libraries runs fine with the submodule unbuilt, so calling
   // it broken would send every such plugin to a repair it does not need.
-  it("holds no opinion about an unbuilt file: library the plugin inlined at build time", () => {
-    const pkgPath = writePkg(linkedPkg);
+  it("holds no opinion about an unbuilt library the plugin inlined at build time", () => {
+    const pkgPath = writePkg(providerPkg);
     writeShippedFiles(`function listAccounts() { return []; }`);
-    writeLinkedLibrary("core-auth", "dist/index.js", false);
+    writeLibrarySubmodule("core-auth", "@intisy-ai/core-auth", false);
     expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual([]);
   });
 
-  it("holds no opinion about registry dependencies, which have no build of their own here", () => {
-    const pkgPath = writePkg({ ...providerPkg, dependencies: { "@openauthjs/openauth": "^0.4.3" } });
+  it("holds no opinion about a clone that declares no submodules at all", () => {
+    const pkgPath = writePkg(providerPkg);
     writeShippedFiles(`import { issuer } from "@openauthjs/openauth";`);
     expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual([]);
   });

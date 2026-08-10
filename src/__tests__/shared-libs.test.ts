@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
-import { declaredLibraries, materializeLibraries, sharedStoreDir, unbuiltLibraries } from "../shared-libs.js";
+import { declaredLibraries, materializeLibraries, sharedStoreDir, submoduleTree, unbuiltLibraries } from "../shared-libs.js";
 
 let workDir: string | undefined;
 afterEach(() => {
@@ -56,6 +56,29 @@ describe("declaredLibraries", () => {
 
   it("returns nothing for a clone carrying no submodules", () => {
     expect(declaredLibraries(makeClone({}))).toEqual([]);
+  });
+});
+
+describe("submoduleTree", () => {
+  it("lists every submodule the clone declares", () => {
+    const sourceDir = makeClone({ core: { name: "core" }, "core-auth": { name: "core-auth" } });
+    expect(submoduleTree(sourceDir)).toEqual(["core", "core-auth"]);
+  });
+
+  // A library carries libraries of its own (core-proxy nests core-ir), and each has a build
+  // output the clone needs. A one-level read is what left those out of the copy-back.
+  it("descends into a submodule that carries submodules of its own", () => {
+    const sourceDir = makeClone({ "core-proxy": { name: "core-proxy" } });
+    mkdirSync(join(sourceDir, "core-proxy", "core-ir"), { recursive: true });
+    writeFileSync(
+      join(sourceDir, "core-proxy", ".gitmodules"),
+      `[submodule "core-ir"]\n\tpath = core-ir\n\turl = https://example.invalid/core-ir\n`,
+    );
+    expect(submoduleTree(sourceDir)).toEqual(["core-proxy", join("core-proxy", "core-ir")]);
+  });
+
+  it("returns nothing for a clone carrying no submodules", () => {
+    expect(submoduleTree(makeClone({}))).toEqual([]);
   });
 });
 

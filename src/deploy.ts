@@ -94,34 +94,19 @@ function importsByName(shipped: string, packageName: string): boolean {
   return new RegExp(`["'\`]${escaped}(/[^"'\`]*)?["'\`]`).test(shipped);
 }
 
-// A plugin can carry its libraries as `file:` dependencies, a submodule built in place
-// rather than installed from the registry. Each has its own build, so an install that
-// stopped partway leaves every file the plugin itself declares present while a library
-// it imports by name was never built: the clone looks healthy and fails only when
-// something imports it, far from the cause.
-//
-// A library only matters when the shipped code still imports it, since a plugin that
-// inlines its libraries at build time carries no reference to them and runs fine with
-// the submodule unbuilt. Those files are read only once a library already looks unbuilt,
-// so the healthy case stays a handful of existsSync calls.
-function missingLinkedLibraryArtifacts(sourceDir: string, dependencies: Record<string, string>, entryFiles: string[]): string[] {
-  const unbuilt: Array<{ packageName: string; artifact: string }> = [];
-  for (const [packageName, spec] of Object.entries(dependencies)) {
-    if (typeof spec !== "string" || !spec.startsWith("file:")) continue;
-    const relative = spec.slice("file:".length);
-    let entry: string | undefined;
-    try {
-      entry = (JSON.parse(fs.readFileSync(path.join(sourceDir, relative, "package.json"), "utf8")) as { main?: string }).main;
-    } catch {
-      continue;
-    }
-    if (!entry || fs.existsSync(path.join(sourceDir, relative, entry))) continue;
-    unbuilt.push({ packageName, artifact: path.posix.join(relative, entry) });
-  }
+// An unbuilt library is only this plugin's problem when its shipped code still imports it by
+// name: a plugin that inlines its libraries at build time carries no reference to them and
+// runs fine with the submodule unbuilt, so calling it broken would send it to a repair it
+// does not need. The entry files are read only once a library already looks unbuilt, which
+// keeps the healthy case to a handful of existsSync calls.
+function unimportableLibraries(sourceDir: string, entryFiles: string[]): string[] {
+  const unbuilt = unbuiltLibraries(sourceDir);
   if (unbuilt.length === 0) return [];
 
   const shipped = entryFiles.map((file) => readOrEmpty(path.join(sourceDir, file))).join("\n");
-  return unbuilt.filter((lib) => importsByName(shipped, lib.packageName)).map((lib) => lib.artifact);
+  return unbuilt
+    .filter((library) => importsByName(shipped, library.specifier))
+    .map((library) => path.posix.join(path.relative(sourceDir, library.dir).split(path.sep).join("/"), "dist"));
 }
 
 // Files the clone says it ships but that the build did not produce. A plugin's main entry
@@ -134,7 +119,6 @@ export function missingDeclaredArtifacts(sourceDir: string, packageJsonPath: str
     pluginEntry?: string;
     claudeHub?: { authProviders?: Array<{ handler?: string }> };
     authProviders?: Array<{ handler?: string }>;
-    dependencies?: Record<string, string>;
   };
   try {
     pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
@@ -148,7 +132,7 @@ export function missingDeclaredArtifacts(sourceDir: string, packageJsonPath: str
   ].filter((f): f is string => typeof f === "string" && f.length > 0);
   const entryFiles = [...new Set(declared)];
   const missing = entryFiles.filter((file) => !fs.existsSync(path.join(sourceDir, file)));
-  return [...missing, ...missingLinkedLibraryArtifacts(sourceDir, pkg.dependencies ?? {}, entryFiles)];
+  return [...missing, ...unimportableLibraries(sourceDir, entryFiles)];
 }
 
 export async function deployToExecutionDir(pluginName: string, executionPath: string, changed: boolean, configDir: string): Promise<boolean> {

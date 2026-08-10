@@ -5,6 +5,7 @@ import { execSync, exec } from "child_process";
 import { promisify } from "util";
 import { getReposDir } from "./env.js";
 import { writeLog } from "./log.js";
+import { submoduleTree } from "./shared-libs.js";
 
 const execAsync = promisify(exec);
 
@@ -36,16 +37,15 @@ export async function precomputeRemoteHashes(
 // @ts-ignore — generated bundle, no .d.ts
 import { loadConfig } from "@intisy-ai/core";
 
-// Deployed clones must carry every dist their bundle references at runtime, since node_modules
-// and untracked submodule builds are not copied back.
-const BUILD_OUTPUT_DIRS = [
-  "dist",
-  path.join("core", "dist"),
-  path.join("core-loader", "dist"),
-  path.join("core-proxy", "dist"),
-  path.join("core-ir", "dist"),
-  path.join("core-proxy", "core-ir", "dist"),
-];
+// The build happens in a temp copy, so a dist left there is a dist the clone never gets.
+// Every submodule builds its own, and a hardcoded list silently dropped the ones nobody had
+// added to it (core-auth, the vendor translators): the build succeeded, its output was
+// discarded, and the plugin stayed broken through any number of repairs. Derived from
+// .gitmodules for the same reason shared-libs derives the library set from it: adding a
+// library is then a submodule and nothing else.
+function buildOutputDirs(sourceDir: string): string[] {
+  return ["dist", ...submoduleTree(sourceDir).map((relative) => path.join(relative, "dist"))];
+}
 
 function getGitTimeoutMs(): number {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -278,7 +278,9 @@ export function buildInTempDir(pluginName: string, sourceDir: string): void {
       writeLog(`Skipped npm run build for ${pluginName} (no build script found)`);
     }
 
-    for (const outputDir of BUILD_OUTPUT_DIRS) {
+    // Read from the temp copy: a submodule the clone has not checked out yet still has its
+    // .gitmodules there after npm install, and its dist only exists there.
+    for (const outputDir of buildOutputDirs(tempDir)) {
       const builtDir = path.join(tempDir, outputDir);
       if (fs.existsSync(builtDir)) {
         // A built dist can be hundreds of megabytes, so this is worth naming too.
