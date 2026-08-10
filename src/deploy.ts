@@ -81,12 +81,61 @@ function applyClaudeManifest(sourceDir: string, configDir: string, pluginName: s
   }
 }
 
-// Files the clone's own package.json says it ships but that the build did not produce. A
-// plugin's main entry landing is not proof the build finished: a provider also declares
-// handlers, and a clone missing one still loads while its accounts and routing do not
-// work. Returned relative to the clone so the caller can name them.
+function readOrEmpty(file: string): string {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function importsByName(shipped: string, packageName: string): boolean {
+  const escaped = packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`["'\`]${escaped}(/[^"'\`]*)?["'\`]`).test(shipped);
+}
+
+// A plugin can carry its libraries as `file:` dependencies, a submodule built in place
+// rather than installed from the registry. Each has its own build, so an install that
+// stopped partway leaves every file the plugin itself declares present while a library
+// it imports by name was never built: the clone looks healthy and fails only when
+// something imports it, far from the cause.
+//
+// A library only matters when the shipped code still imports it, since a plugin that
+// inlines its libraries at build time carries no reference to them and runs fine with
+// the submodule unbuilt. Those files are read only once a library already looks unbuilt,
+// so the healthy case stays a handful of existsSync calls.
+function missingLinkedLibraryArtifacts(sourceDir: string, dependencies: Record<string, string>, entryFiles: string[]): string[] {
+  const unbuilt: Array<{ packageName: string; artifact: string }> = [];
+  for (const [packageName, spec] of Object.entries(dependencies)) {
+    if (typeof spec !== "string" || !spec.startsWith("file:")) continue;
+    const relative = spec.slice("file:".length);
+    let entry: string | undefined;
+    try {
+      entry = (JSON.parse(fs.readFileSync(path.join(sourceDir, relative, "package.json"), "utf8")) as { main?: string }).main;
+    } catch {
+      continue;
+    }
+    if (!entry || fs.existsSync(path.join(sourceDir, relative, entry))) continue;
+    unbuilt.push({ packageName, artifact: path.posix.join(relative, entry) });
+  }
+  if (unbuilt.length === 0) return [];
+
+  const shipped = entryFiles.map((file) => readOrEmpty(path.join(sourceDir, file))).join("\n");
+  return unbuilt.filter((lib) => importsByName(shipped, lib.packageName)).map((lib) => lib.artifact);
+}
+
+// Files the clone says it ships but that the build did not produce. A plugin's main entry
+// landing is not proof the build finished: a provider also declares handlers, and a clone
+// missing one still loads while its accounts and routing do not work. Returned relative to
+// the clone so the caller can name them.
 export function missingDeclaredArtifacts(sourceDir: string, packageJsonPath: string): string[] {
-  let pkg: { main?: string; pluginEntry?: string; claudeHub?: { authProviders?: Array<{ handler?: string }> }; authProviders?: Array<{ handler?: string }> };
+  let pkg: {
+    main?: string;
+    pluginEntry?: string;
+    claudeHub?: { authProviders?: Array<{ handler?: string }> };
+    authProviders?: Array<{ handler?: string }>;
+    dependencies?: Record<string, string>;
+  };
   try {
     pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
   } catch {
@@ -97,7 +146,9 @@ export function missingDeclaredArtifacts(sourceDir: string, packageJsonPath: str
     pkg.pluginEntry,
     ...(pkg.claudeHub?.authProviders ?? pkg.authProviders ?? []).map((p) => p.handler),
   ].filter((f): f is string => typeof f === "string" && f.length > 0);
-  return [...new Set(declared)].filter((file) => !fs.existsSync(path.join(sourceDir, file)));
+  const entryFiles = [...new Set(declared)];
+  const missing = entryFiles.filter((file) => !fs.existsSync(path.join(sourceDir, file)));
+  return [...missing, ...missingLinkedLibraryArtifacts(sourceDir, pkg.dependencies ?? {}, entryFiles)];
 }
 
 export async function deployToExecutionDir(pluginName: string, executionPath: string, changed: boolean, configDir: string): Promise<boolean> {
