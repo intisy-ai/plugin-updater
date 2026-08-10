@@ -375,7 +375,7 @@ async function earlyLaunchInScope(configDir: string, plugins: Plugin[], trigger:
 // updatePluginPublic: the registry side-effect is wired here, once.
 export { checkUpdates };
 export { checkPluginHealth, checkAllPluginHealth, missingPluginArtifacts, repairPlugin, type PluginHealth } from "./repair.js";
-export { homeLibraries, sharedLibraries, pluginDependencies, type HomeLibraries, type InstalledLibrary, type PluginDependencies } from "./libraries.js";
+export { homeLibraries, sharedLibraries, pluginDependencies, removeLibrary, orphanedLibraries, type HomeLibraries, type InstalledLibrary, type PluginDependencies } from "./libraries.js";
 export { updaterSchema };
 
 export function updateOne(configDir: string, name: string) {

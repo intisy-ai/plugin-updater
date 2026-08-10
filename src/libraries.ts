@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getReposDir } from "./env.js";
 import { declaredLibraries, sharedStoreDir } from "./shared-libs.js";
+import { writeLog } from "./log.js";
 
 // One resolvable package on disk, whether it came from the shared store or a plugin's
 // own npm install. `usedBy` is only meaningful for shared libraries: it names the plugins
@@ -85,6 +86,27 @@ export function sharedLibraries(configDir: string): InstalledLibrary[] {
     .filter((library): library is InstalledLibrary => library !== null)
     .map((library) => ({ ...library, usedBy: (declarers.get(library.specifier) ?? []).sort() }))
     .sort(byName);
+}
+
+// Removes a library from a home's shared store. Refuses while a plugin still declares it: the
+// store is what those plugins resolve their imports from, so taking it out from under them is
+// the "cannot find package" failure this ecosystem already knows well. The caller decides
+// whether to uninstall those plugins first.
+export function removeLibrary(configDir: string, specifier: string): { removed: boolean; usedBy: string[] } {
+  const usedBy = (declarersBySpecifier(getReposDir(configDir)).get(specifier) ?? []).sort();
+  if (usedBy.length > 0) return { removed: false, usedBy };
+
+  const target = path.join(sharedStoreDir(configDir), ...specifier.split("/"));
+  if (!fs.existsSync(target)) return { removed: false, usedBy: [] };
+  fs.rmSync(target, { recursive: true, force: true });
+  writeLog(`Removed shared library ${specifier}`);
+  return { removed: true, usedBy: [] };
+}
+
+// Every library in the store that no installed plugin declares. Uninstalling a plugin can leave
+// its libraries behind, which is how a home came to offer a wire format nothing could serve.
+export function orphanedLibraries(configDir: string): string[] {
+  return sharedLibraries(configDir).filter((library) => library.usedBy.length === 0).map((library) => library.specifier);
 }
 
 // A plugin's own dependencies, reported at the version actually installed next to it
