@@ -184,9 +184,7 @@ export function updatePlugin(
       executeGit(`git checkout ${commitHash}`, targetDir);
     } else if (branch) {
       executeGit(`git checkout ${branch}`, targetDir);
-      // A channel branch gets force-pushed, and a --ff-only pull then refuses and leaves the
-      // clone silently behind. The updater owns repos/, so hard-sync it the way the
-      // default-branch path below already does.
+      // A force-pushed channel branch would leave a --ff-only pull refusing and the clone silently behind.
       executeGit(`git reset --hard origin/${branch}`, targetDir);
     } else {
       // the updater owns repos/: hard-sync to the remote so force-pushed
