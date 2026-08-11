@@ -1,8 +1,8 @@
-// Integration test for FIX 1: core-loader's downgrade TUI action calls
-// `updater.downgrade(repo, commitHash)` synchronously and expects a string return
-// ("" = ok). It must persist the pin (plugins.json commitHash) so the NEXT
-// earlyLaunch honors it instead of reverting to a normal branch pull; and a plain
-// updatePluginPublic() call with no commitHash must clear that pin again.
+// core-loader's downgrade TUI action calls `updater.downgrade(repo, commitHash)`
+// synchronously and expects a string return ("" = ok). It must persist the pin
+// (plugins.json commitHash) so the NEXT earlyLaunch honors it instead of reverting to a
+// normal branch pull; and a plain updatePluginPublic() call with no commitHash must
+// clear that pin again.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -95,7 +95,9 @@ describe("downgrade + pin reversibility", () => {
 
     const pluginsAfterUpdate = JSON.parse(readFileSync(join(configDir, "config", "plugins.json"), "utf8")) as Plugin[];
     expect(pluginsAfterUpdate[0].commitHash).toBeUndefined();
-  }, 60000);
+    // Clones and pulls two real git repos, so it runs an order of magnitude longer than a
+    // unit test, and longer again when the full suite has every worker busy.
+  }, 180000);
 
   it("returns a non-empty error string for a plugin missing its url (no git call attempted)", async () => {
     const { downgrade } = await import("../index.js");
