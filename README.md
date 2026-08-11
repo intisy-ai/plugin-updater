@@ -112,6 +112,8 @@ Config file: `<configDir>/config/plugin-updater.json` (edit via the loader or `/
   "self_update": true,
   "update_on_launch": true,
   "auto_update_mode": "update",
+  "experimental": false,
+  "experimental_branch": "experimental",
   "auto_update_triggers": {
     "loader": true,
     "app": true,
@@ -131,6 +133,8 @@ Config file: `<configDir>/config/plugin-updater.json` (edit via the loader or `/
 | `self_update` | `true` |
 | `update_on_launch` | `true` |
 | `auto_update_mode` | `"update"` |
+| `experimental` | `false` |
+| `experimental_branch` | `"experimental"` |
 | `auto_update_triggers` | `{"loader":true,"app":true,"cairn":true}` |
 
 ## Commands
