@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import { writeLog } from "./log.js";
 import { getPlugins, readOpencodeJson } from "./config.js";
-import { precomputeRemoteHashes, getLocalHead, updatePlugin } from "./git.js";
+import { precomputeRemoteHashes, detectExperimentalBranches, getLocalHead, updatePlugin } from "./git.js";
 import { precomputeLatestNpmVersions, resolveNpmPluginVersion } from "./npm.js";
 import {
   readUpdateCache,
@@ -19,7 +19,9 @@ import { emitUpdatesAvailable, emitPluginUpdated, emitPluginInstalled, emitPlugi
 import { deployToExecutionDir } from "./deploy.js";
 import { shouldPull, triggerEnabled, type Trigger } from "./policy.js";
 import { readUpdaterConfig } from "./schema.js";
+import { experimentalBranchName, resolveBranch } from "./channel.js";
 import type { Plugin } from "./types.js";
+import { getReposDir, getPluginDir } from "./env.js";
 
 export interface CheckResult {
   checkedAt: string;
@@ -51,10 +53,18 @@ export async function checkUpdates(configDir: string, plugins?: Plugin[]): Promi
     if (updateAvailable) available.push(name);
     recordCacheEntry(cache, previousCache, name, {
       kind: "npm", installedVersion, localHead: null, remoteHead: null, latestVersion, updateAvailable,
+      experimentalAvailable: null,
     }, false, checkedAt);
   }
 
-  const remoteHashes = await precomputeRemoteHashes(list);
+  const cfg = readUpdaterConfig(configDir);
+  const branchName = experimentalBranchName(cfg);
+  const detectedNow = await detectExperimentalBranches(list, branchName);
+  const resolved = list.map((p) => ({
+    ...p,
+    branch: resolveBranch(p, cfg, detectedNow.get(p.name) ?? previousCache.plugins[p.name]?.experimentalAvailable ?? null),
+  }));
+  const remoteHashes = await precomputeRemoteHashes(resolved);
   for (const plugin of list) {
     const localHead = getLocalHead(plugin.name);
     const remoteHead = remoteHashes.get(plugin.name) ?? null;
@@ -62,6 +72,7 @@ export async function checkUpdates(configDir: string, plugins?: Plugin[]): Promi
     if (updateAvailable) available.push(plugin.name);
     recordCacheEntry(cache, previousCache, plugin.name, {
       kind: "git", installedVersion: null, localHead, remoteHead, latestVersion: null, updateAvailable,
+      experimentalAvailable: detectedNow.get(plugin.name) ?? previousCache.plugins[plugin.name]?.experimentalAvailable ?? null,
     }, false, checkedAt);
   }
 
@@ -77,7 +88,7 @@ const LOCK_NAME = ".update.lock";
 const LOCK_STALE_MS = 15 * 60 * 1000;
 
 function lockPath(configDir: string): string {
-  return path.join(configDir, "repos", LOCK_NAME);
+  return path.join(getReposDir(configDir), LOCK_NAME);
 }
 
 // Two processes pulling the same clone corrupt it, so a run either owns the lock or does
@@ -99,7 +110,7 @@ export async function withUpdateLock<T>(configDir: string, fn: () => Promise<T>)
     writeLog(`Another process is updating ${configDir}, skipping this run`);
     return null;
   }
-  try { fs.mkdirSync(path.join(configDir, "repos"), { recursive: true }); } catch { /* the write below reports it */ }
+  try { fs.mkdirSync(getReposDir(configDir), { recursive: true }); } catch { /* the write below reports it */ }
   try {
     fs.writeFileSync(lockPath(configDir), JSON.stringify({ pid: process.pid, at: Date.now() }), "utf8");
   } catch { /* proceed unlocked rather than skipping the update entirely */ }
@@ -146,7 +157,7 @@ async function pullCandidates(configDir: string, check: CheckResult, opts: PullO
     if (byHuman && !(opts.only as string[]).includes(plugin.name)) continue;
     if (!plugin.url) { outcome.skipped.push(plugin.name); continue; }
     const entry = cache.plugins[plugin.name];
-    const alreadyCloned = fs.existsSync(path.join(configDir, "repos", plugin.name));
+    const alreadyCloned = fs.existsSync(path.join(getReposDir(configDir), plugin.name));
     if (alreadyCloned && entry && !entry.updateAvailable && !byHuman) continue;
     if (!byHuman && alreadyCloned && !shouldPull(cfg, plugin.autoUpdate)) {
       outcome.skipped.push(plugin.name);
@@ -156,8 +167,10 @@ async function pullCandidates(configDir: string, check: CheckResult, opts: PullO
     const previousVersion = alreadyCloned ? getLocalHead(plugin.name) : null;
     emitPluginProgress(plugin.name, alreadyCloned ? "updating" : "installing");
     try {
+      const detected = previousCache.plugins[plugin.name]?.experimentalAvailable ?? null;
+      const tracked = resolveBranch(plugin, cfg, detected);
       const result = updatePlugin(
-        plugin.name, plugin.url, plugin.branch, plugin.commitHash ?? null,
+        plugin.name, plugin.url, tracked, plugin.commitHash ?? null,
         byHuman ? 0 : (plugin.updateInterval ?? defaultIntervalHours),
         entry?.remoteHead ?? undefined,
       );
@@ -165,13 +178,14 @@ async function pullCandidates(configDir: string, check: CheckResult, opts: PullO
       recordCacheEntry(cache, previousCache, plugin.name, {
         kind: "git", installedVersion: null, localHead, remoteHead: entry?.remoteHead ?? null,
         latestVersion: null, updateAvailable: gitUpdateAvailable(localHead, entry?.remoteHead ?? null),
+        experimentalAvailable: entry?.experimentalAvailable ?? null,
       }, result.changed, check.checkedAt);
       if (!result.success) {
         emitPluginUpdateFailed(plugin.name, new Error(`update failed for ${plugin.name} - see the updater log`));
         outcome.failed.push(plugin.name);
         continue;
       }
-      await deployToExecutionDir(plugin.name, path.join(configDir, "plugin"), result.changed, configDir);
+      await deployToExecutionDir(plugin.name, getPluginDir(configDir), result.changed, configDir);
       if (result.changed) {
         if (previousVersion !== null) emitPluginUpdated(plugin.name, previousVersion, localHead, byHuman ? "manual" : "launch");
         else emitPluginInstalled(plugin.name, localHead, byHuman ? "manual" : "launch");

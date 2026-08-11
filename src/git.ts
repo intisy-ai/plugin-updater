@@ -5,6 +5,7 @@ import { execSync, exec } from "child_process";
 import { promisify } from "util";
 import { getReposDir } from "./env.js";
 import { writeLog } from "./log.js";
+import { submoduleTree } from "./shared-libs.js";
 
 const execAsync = promisify(exec);
 
@@ -33,19 +34,40 @@ export async function precomputeRemoteHashes(
   }));
   return out;
 }
+
+// Asked of the URL rather than a clone, so a plugin that is not installed yet still gets an
+// answer. A remote that cannot be reached is left OUT of the map: absent means unknown,
+// which the resolver treats differently from a definite "no such branch".
+export async function detectExperimentalBranches(
+  plugins: Array<{ name: string; url?: string; enabled?: boolean; commitHash?: string | null }>,
+  branch: string,
+  timeoutMs = 20000,
+): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  await Promise.all((plugins || []).map(async (p) => {
+    if (!p || !p.url || p.enabled === false || p.commitHash) return;
+    try {
+      const { stdout } = await execAsync(`git ls-remote --heads ${p.url} ${branch}`, {
+        timeout: timeoutMs,
+        env: { ...process.env, GCM_INTERACTIVE: "never", GIT_TERMINAL_PROMPT: "0" },
+      });
+      out.set(p.name, String(stdout).trim().length > 0);
+    } catch { /* unreachable remote: leave unset so the caller records unknown */ }
+  }));
+  return out;
+}
 // @ts-ignore — generated bundle, no .d.ts
 import { loadConfig } from "@intisy-ai/core";
 
-// Deployed clones must carry every dist their bundle references at runtime, since node_modules
-// and untracked submodule builds are not copied back.
-const BUILD_OUTPUT_DIRS = [
-  "dist",
-  path.join("core", "dist"),
-  path.join("core-loader", "dist"),
-  path.join("core-proxy", "dist"),
-  path.join("core-ir", "dist"),
-  path.join("core-proxy", "core-ir", "dist"),
-];
+// The build happens in a temp copy, so a dist left there is a dist the clone never gets.
+// Every submodule builds its own, and a hardcoded list silently dropped the ones nobody had
+// added to it (core-auth, the vendor translators): the build succeeded, its output was
+// discarded, and the plugin stayed broken through any number of repairs. Derived from
+// .gitmodules for the same reason shared-libs derives the library set from it: adding a
+// library is then a submodule and nothing else.
+function buildOutputDirs(sourceDir: string): string[] {
+  return ["dist", ...submoduleTree(sourceDir).map((relative) => path.join(relative, "dist"))];
+}
 
 function getGitTimeoutMs(): number {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -162,7 +184,8 @@ export function updatePlugin(
       executeGit(`git checkout ${commitHash}`, targetDir);
     } else if (branch) {
       executeGit(`git checkout ${branch}`, targetDir);
-      executeGit(`git pull --ff-only origin ${branch}`, targetDir);
+      // A force-pushed channel branch would leave a --ff-only pull refusing and the clone silently behind.
+      executeGit(`git reset --hard origin/${branch}`, targetDir);
     } else {
       // the updater owns repos/: hard-sync to the remote so force-pushed
       // branches and rewritten submodule history cannot strand the clone
@@ -268,15 +291,23 @@ export function buildInTempDir(pluginName: string, sourceDir: string): void {
 
     const pkg = JSON.parse(fs.readFileSync(path.join(tempDir, "package.json"), "utf8")) as { scripts?: { build?: string } };
     if (pkg.scripts?.build) {
+      // Said BEFORE the build, not only after: this is the longest step by far (a
+      // provider transpiles Java through gradle here), and without it the progress
+      // readout sat on the previous step's label for the whole thing.
+      writeLog(`Running npm run build for ${pluginName}`);
       execSync("npm run build", { windowsHide: true, cwd: tempDir, stdio: "pipe", timeout: buildTimeoutMs });
       writeLog(`Finished npm run build for ${pluginName}`);
     } else {
       writeLog(`Skipped npm run build for ${pluginName} (no build script found)`);
     }
 
-    for (const outputDir of BUILD_OUTPUT_DIRS) {
+    // Read from the temp copy: a submodule the clone has not checked out yet still has its
+    // .gitmodules there after npm install, and its dist only exists there.
+    for (const outputDir of buildOutputDirs(tempDir)) {
       const builtDir = path.join(tempDir, outputDir);
       if (fs.existsSync(builtDir)) {
+        // A built dist can be hundreds of megabytes, so this is worth naming too.
+        writeLog(`Copying build output ${outputDir}/ for ${pluginName}`);
         copyTree(builtDir, path.join(sourceDir, outputDir), pluginName);
       }
     }

@@ -6,7 +6,7 @@ import { getAppName, getReposDir } from "./env.js";
 import { writeLog } from "./log.js";
 import { buildInTempDir } from "./git.js";
 import { startDeclaredDaemon } from "./daemon.js";
-import { materializeLibraries } from "./shared-libs.js";
+import { materializeLibraries, unbuiltLibraries } from "./shared-libs.js";
 
 // The clone's current commit, used to tie a deployed artifact to the source it was
 // built from (self-heals a stale deploy left by an earlier interrupted pass).
@@ -81,12 +81,45 @@ function applyClaudeManifest(sourceDir: string, configDir: string, pluginName: s
   }
 }
 
-// Files the clone's own package.json says it ships but that the build did not produce. A
-// plugin's main entry landing is not proof the build finished: a provider also declares
-// handlers, and a clone missing one still loads while its accounts and routing do not
-// work. Returned relative to the clone so the caller can name them.
+function readOrEmpty(file: string): string {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function importsByName(shipped: string, packageName: string): boolean {
+  const escaped = packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`["'\`]${escaped}(/[^"'\`]*)?["'\`]`).test(shipped);
+}
+
+// An unbuilt library is only this plugin's problem when its shipped code still imports it by
+// name: a plugin that inlines its libraries at build time carries no reference to them and
+// runs fine with the submodule unbuilt, so calling it broken would send it to a repair it
+// does not need. The entry files are read only once a library already looks unbuilt, which
+// keeps the healthy case to a handful of existsSync calls.
+function unimportableLibraries(sourceDir: string, entryFiles: string[]): string[] {
+  const unbuilt = unbuiltLibraries(sourceDir);
+  if (unbuilt.length === 0) return [];
+
+  const shipped = entryFiles.map((file) => readOrEmpty(path.join(sourceDir, file))).join("\n");
+  return unbuilt
+    .filter((library) => importsByName(shipped, library.specifier))
+    .map((library) => path.posix.join(path.relative(sourceDir, library.dir).split(path.sep).join("/"), "dist"));
+}
+
+// Files the clone says it ships but that the build did not produce. A plugin's main entry
+// landing is not proof the build finished: a provider also declares handlers, and a clone
+// missing one still loads while its accounts and routing do not work. Returned relative to
+// the clone so the caller can name them.
 export function missingDeclaredArtifacts(sourceDir: string, packageJsonPath: string): string[] {
-  let pkg: { main?: string; pluginEntry?: string; claudeHub?: { authProviders?: Array<{ handler?: string }> }; authProviders?: Array<{ handler?: string }> };
+  let pkg: {
+    main?: string;
+    pluginEntry?: string;
+    claudeHub?: { authProviders?: Array<{ handler?: string }> };
+    authProviders?: Array<{ handler?: string }>;
+  };
   try {
     pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
   } catch {
@@ -97,7 +130,9 @@ export function missingDeclaredArtifacts(sourceDir: string, packageJsonPath: str
     pkg.pluginEntry,
     ...(pkg.claudeHub?.authProviders ?? pkg.authProviders ?? []).map((p) => p.handler),
   ].filter((f): f is string => typeof f === "string" && f.length > 0);
-  return [...new Set(declared)].filter((file) => !fs.existsSync(path.join(sourceDir, file)));
+  const entryFiles = [...new Set(declared)];
+  const missing = entryFiles.filter((file) => !fs.existsSync(path.join(sourceDir, file)));
+  return [...missing, ...unimportableLibraries(sourceDir, entryFiles)];
 }
 
 export async function deployToExecutionDir(pluginName: string, executionPath: string, changed: boolean, configDir: string): Promise<boolean> {
@@ -129,7 +164,12 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // Fast path: nothing changed, the deployed file is in place, AND it matches the clone's
   // HEAD. Skips the build/install AND (below) the copy + plugin re-import + re-activate,
   // which otherwise cost ~1s+ per plugin on EVERY launch and blocked startup.
-  const nothingToDeploy = !changed && deployedExists && !artifactStale && incomplete.length === 0;
+  // A library the clone declares but never built cannot be put in the home's store, so the
+  // plugin that imports it by name fails to load. Only a build produces it, and the fast path
+  // is what skips that build, which is why such a home never repaired itself on any launch.
+  const unbuilt = unbuiltLibraries(sourceDir);
+  if (unbuilt.length > 0) writeLog(`${pluginName} declares ${unbuilt.map((l) => l.specifier).join(", ")} with no build output — forcing rebuild`, true);
+  const nothingToDeploy = !changed && deployedExists && !artifactStale && incomplete.length === 0 && unbuilt.length === 0;
 
   let buildComplete = true;
   if (nothingToDeploy) {
@@ -186,6 +226,12 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // ENOENT on the copy. Any already-deployed plugin/<name>.js stays in place.
   // Only touch the deployed file when something actually changed — the cleanup
   // imports the old module and the copy rewrites it, both pointless when unchanged.
+  // Outside the "did anything change" guard on purpose: a home installed before the
+  // libraries were shared has no store at all, and nothing about it changes, so
+  // gating this would leave every plugin there unable to resolve its imports
+  // forever. Re-running is cheap, since an up-to-date library is left alone.
+  materializeLibraries(sourceDir, configDir, writeLog);
+
   if (!nothingToDeploy) {
     if (!fs.existsSync(deploySource)) {
       writeLog(`Skipping deploy for ${pluginName}: built file not found at ${deploySource}`, true);
@@ -199,9 +245,6 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
       const pkgMarker = path.join(executionPath, "package.json");
       if (!fs.existsSync(pkgMarker)) fs.writeFileSync(pkgMarker, JSON.stringify({ type: "module" }, null, 2), "utf8");
     } catch { /* non-fatal */ }
-    // Before the bundle lands, so a plugin that imports its libraries by name
-    // instead of inlining them can resolve them the moment it is first loaded.
-    materializeLibraries(sourceDir, configDir, writeLog);
     await callPluginCleanup(pluginExecutionFile, configDir);
     try {
       writeLog(`Running copy for ${pluginName}`);

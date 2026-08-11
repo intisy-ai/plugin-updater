@@ -3,7 +3,8 @@ import path from "path";
 import os from "os";
 import { customAppHome } from "./apps.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { currentAppId } from "@intisy-ai/core";
+import { currentAppId, appPaths, getAppDescriptor } from "@intisy-ai/core";
+import type { AppPaths } from "@intisy-ai/core";
 
 // set by earlyLaunch/direct-update so all path resolution targets that dir
 let earlyLaunchConfigDir: string | null = null;
@@ -48,8 +49,22 @@ export function getAppConfigDir(appName: string): string {
   return fs.existsSync(configPath) || !fs.existsSync(directPath) ? configPath : directPath;
 }
 
-export function getReposDir(): string {
-  return path.join(getAppConfigDir(getAppName()), "repos");
+// The storage directories for a home, resolved from the app's registry entry so a
+// renamed one takes effect everywhere at once. Never join the literal names.
+export function getPaths(configDir: string = getAppConfigDir(getAppName())): AppPaths {
+  return appPaths(configDir, getAppDescriptor(getAppName()) ?? null);
+}
+
+export function getReposDir(configDir?: string): string {
+  return getPaths(configDir).repos;
+}
+
+export function getPluginDir(configDir?: string): string {
+  return getPaths(configDir).plugin;
+}
+
+export function getCacheDir(configDir?: string): string {
+  return getPaths(configDir).cache;
 }
 
 // opencode invokes every exported function as a plugin hook, passing a context

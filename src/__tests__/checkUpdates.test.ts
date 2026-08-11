@@ -8,7 +8,7 @@ import { execSync } from "child_process";
 // @ts-ignore: generated bundle, no .d.ts
 import { readActivity } from "@intisy-ai/core";
 import { getPluginsPath } from "../config.js";
-import { getCachePath } from "../cache.js";
+import { getCachePath, writeUpdateCache } from "../cache.js";
 import { setEarlyLaunchConfigDir } from "../env.js";
 
 function git(cmd: string, cwd: string): string {
@@ -152,5 +152,55 @@ describe("checkUpdates", () => {
 
     const { records } = readActivity([configDir], { topics: ["plugin.installed"] });
     expect(records.find((r: { action: string }) => r.action === "updates_available")).toBeUndefined();
+  }, 60000);
+
+  it("records experimentalAvailable true for a remote that carries the branch and false for one that does not", async () => {
+    const withOrigin = join(originsRoot, "origin-with-channel");
+    initRepo(withOrigin);
+    git("git branch experimental", withOrigin);
+    git(`git clone --branch main "${withOrigin}" "with-channel"`, join(configDir, "repos"));
+
+    const withoutOrigin = join(originsRoot, "origin-without-channel");
+    initRepo(withoutOrigin);
+    git(`git clone --branch main "${withoutOrigin}" "without-channel"`, join(configDir, "repos"));
+
+    writeFileSync(getPluginsPath(configDir), JSON.stringify([
+      { name: "with-channel", url: withOrigin, branch: "main", enabled: true },
+      { name: "without-channel", url: withoutOrigin, branch: "main", enabled: true },
+    ]), "utf8");
+
+    const { checkUpdates } = await import("../updates.js");
+    const result = await checkUpdates(configDir);
+
+    expect(result.cache.plugins["with-channel"].experimentalAvailable).toBe(true);
+    expect(result.cache.plugins["without-channel"].experimentalAvailable).toBe(false);
+    const onDisk = JSON.parse(readFileSync(getCachePath(configDir), "utf8"));
+    expect(onDisk.plugins["with-channel"].experimentalAvailable).toBe(true);
+    expect(onDisk.plugins["without-channel"].experimentalAvailable).toBe(false);
+  }, 60000);
+
+  it("records a definite false from detection instead of falling back to a stale previous-cache true", async () => {
+    const origin = join(originsRoot, "origin-regress");
+    initRepo(origin);
+    git(`git clone --branch main "${origin}" "regress-demo"`, join(configDir, "repos"));
+    writeFileSync(getPluginsPath(configDir), JSON.stringify([
+      { name: "regress-demo", url: origin, branch: "main", enabled: true },
+    ]), "utf8");
+    // A previous run once saw the branch; the remote no longer carries it, and this
+    // run's definite `false` must win over that stale `true`.
+    writeUpdateCache(configDir, {
+      checkedAt: new Date().toISOString(),
+      plugins: {
+        "regress-demo": {
+          kind: "git", installedVersion: null, localHead: "deadbeef", remoteHead: "deadbeef",
+          latestVersion: null, updateAvailable: false, experimentalAvailable: true, updatedAt: null,
+        },
+      },
+    });
+
+    const { checkUpdates } = await import("../updates.js");
+    const result = await checkUpdates(configDir);
+
+    expect(result.cache.plugins["regress-demo"].experimentalAvailable).toBe(false);
   }, 60000);
 });

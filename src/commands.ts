@@ -10,6 +10,7 @@ import { dirname, join } from "path";
 import fs from "fs";
 import { runConfigCli, runAllConfigCli, deployCommands, getAppConfigDir as coreGetAppConfigDir } from "@intisy-ai/core";
 import { getPlugins } from "./config.js";
+import { getPluginDir } from "./env.js";
 
 const PLUGIN = "plugin-updater";
 const SELF = join(dirname(fileURLToPath(import.meta.url)), "index.js");
@@ -49,7 +50,7 @@ export async function maybeRunCli() {
     const names = getPlugins(configDir).map((p) => p.name);
     const resolveBundle = (name) => {
       if (name === PLUGIN) return SELF;
-      const p = join(configDir, "plugin", `${name}.js`);
+      const p = path.join(getPluginDir(configDir), `${name}.js`);
       return fs.existsSync(p) ? p : null;
     };
     runAllConfigCli(argv.slice(1), { plugins: [...names, PLUGIN], resolveBundle });

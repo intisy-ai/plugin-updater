@@ -3,6 +3,9 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { registerPlugin, setPluginEnabled, setPluginAutoUpdate, getPlugins } from "./config.js";
+import { UPDATER_DEFAULTS, UPDATER_NAME } from "./schema.js";
+// @ts-ignore: generated bundle, no .d.ts
+import { getCapabilities, loadConfig } from "@intisy-ai/core";
 
 let dir: string;
 
@@ -40,5 +43,61 @@ describe("plugins.json writers", () => {
     expect(setPluginEnabled(dir, "nope", true)).toBe(false);
     registerPlugin(dir, "plugin-a", "u1");
     expect(setPluginAutoUpdate(dir, "nope", true)).toBe(false);
+  });
+});
+
+describe("channel defaults", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pu-channel-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("with no config file on disk, loadConfig returns empty; merge with defaults yields the channel settings", () => {
+    const diskConfig = loadConfig(UPDATER_NAME, tempDir);
+    expect(diskConfig).toEqual({});
+
+    const merged = { ...UPDATER_DEFAULTS, ...diskConfig };
+    expect(merged.experimental).toBe(false);
+    expect(merged.experimental_branch).toBe("experimental");
+  });
+
+  it("with a config file on disk, the merge resolves file values over defaults", () => {
+    fs.mkdirSync(path.join(tempDir, "config"), { recursive: true });
+    const configFile = path.join(tempDir, "config", `${UPDATER_NAME}.json`);
+    fs.writeFileSync(configFile, JSON.stringify({
+      experimental: true,
+      experimental_branch: "next",
+      other_field: "value"
+    }), "utf8");
+
+    const diskConfig = loadConfig(UPDATER_NAME, tempDir);
+    expect(diskConfig.experimental).toBe(true);
+    expect(diskConfig.experimental_branch).toBe("next");
+    expect(diskConfig.other_field).toBe("value");
+
+    const merged = { ...UPDATER_DEFAULTS, ...diskConfig };
+    expect(merged.experimental).toBe(true);
+    expect(merged.experimental_branch).toBe("next");
+    expect(merged.logging).toBe(true);
+  });
+
+  it("the registered field list contains both channel settings and every non-dotted key corresponds to a default", () => {
+    const caps = getCapabilities(UPDATER_NAME);
+    const fieldKeys = (caps.fields || []).map((f: { key: string }) => f.key);
+
+    expect(fieldKeys).toContain("experimental");
+    expect(fieldKeys).toContain("experimental_branch");
+
+    const defaultKeys = Object.keys(UPDATER_DEFAULTS).filter(k => !k.includes("."));
+    for (const fieldKey of fieldKeys) {
+      if (!fieldKey.includes(".")) {
+        expect(defaultKeys).toContain(fieldKey);
+      }
+    }
   });
 });

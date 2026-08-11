@@ -9,6 +9,8 @@ export interface Plugin {
   updateInterval?: number; // hours between git fetch checks, default 1
   sync?: boolean; // mirror this entry into the other app's plugins.json (via sync-bridge)
   commitHash?: string | null; // pin to a specific commit (e.g. after a downgrade); persists across earlyLaunch runs
+  // inherit (or absent) follows the home's experimental flag; stable and experimental override it.
+  channel?: "inherit" | "stable" | "experimental";
 }
 
 export interface NpmPlugin {

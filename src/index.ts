@@ -1,4 +1,4 @@
-import { getAppConfigDir, getAppName, getReposDir, isOpencodeHookInvocation, setEarlyLaunchConfigDir } from "./env.js";
+import { getAppConfigDir, getAppName, getReposDir, isOpencodeHookInvocation, setEarlyLaunchConfigDir, getPluginDir } from "./env.js";
 import { writeLog } from "./log.js";
 import { getPlugins, getPluginsPath, readOpencodeJson, setPluginCommitHash } from "./config.js";
 import { selfUpdate, updateNpmPlugin, resolveNpmPluginVersion } from "./npm.js";
@@ -7,9 +7,11 @@ import { deployToExecutionDir } from "./deploy.js";
 import { syncAllAcrossApps } from "./syncbridge.js";
 import { checkUpdates, runAutoUpdate, updateOne as updateOneInHome, updateAll as updateAllInHome } from "./updates.js";
 import { resolveMode, type Trigger } from "./policy.js";
+import { resolveBranch, tracksExperimental } from "./channel.js";
+import { readUpdateCache } from "./cache.js";
 // Importing this registers the config defaults and the capability schema, which must
 // happen before the CLI guard below so `config schema` answers.
-import { updaterSchema } from "./schema.js";
+import { updaterSchema, readUpdaterConfig } from "./schema.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
@@ -139,20 +141,20 @@ if (await maybeRunCli()) {
 function pruneOrphans(configDir: string, plugins: Plugin[]): void {
   const keep = new Set(plugins.map((p) => p.name));
   try {
-    for (const dir of fs.readdirSync(path.join(configDir, "repos"))) {
+    for (const dir of fs.readdirSync(getReposDir(configDir))) {
       if (!keep.has(dir)) {
         // Said before the removal, not only after: a clone carries its node_modules, so this
         // is the slow part of an uninstall and the only one worth watching.
         writeLog(`Removing repos/${dir}`);
-        try { fs.rmSync(path.join(configDir, "repos", dir), { recursive: true, force: true }); writeLog(`Pruned orphaned repos/${dir}`); } catch { /* ignore */ }
+        try { fs.rmSync(path.join(getReposDir(configDir), dir), { recursive: true, force: true }); writeLog(`Pruned orphaned repos/${dir}`); } catch { /* ignore */ }
       }
     }
   } catch { /* no repos dir */ }
   try {
-    for (const file of fs.readdirSync(path.join(configDir, "plugin"))) {
+    for (const file of fs.readdirSync(getPluginDir(configDir))) {
       if (!file.endsWith(".js")) continue;
       if (!keep.has(file.slice(0, -3))) {
-        try { fs.unlinkSync(path.join(configDir, "plugin", file)); writeLog(`Pruned orphaned plugin/${file}`); } catch { /* ignore */ }
+        try { fs.unlinkSync(path.join(getPluginDir(configDir), file)); writeLog(`Pruned orphaned plugin/${file}`); } catch { /* ignore */ }
       }
     }
   } catch { /* no plugin dir */ }
@@ -210,10 +212,13 @@ export async function updatePluginPublic(
   if (isOpencodeHookInvocation(pluginName)) return {};
   writeLog(`Public API update call for ${pluginName}`);
   const configDir = getAppConfigDir(getAppName());
-  const repoDir = path.join(configDir, "repos", pluginName);
+  const entry = getPlugins(configDir).find((p) => p.name === pluginName);
+  const detected = readUpdateCache(configDir).plugins[pluginName]?.experimentalAvailable ?? null;
+  const tracked = branch ?? resolveBranch(entry ?? {}, readUpdaterConfig(configDir), detected);
+  const repoDir = path.join(getReposDir(configDir), pluginName);
   const previousVersion = fs.existsSync(repoDir) ? getLocalHead(pluginName) : null;
   // interval 0: an explicit update request must never fast-path-skip
-  const result = updatePlugin(pluginName, gitUrl, branch, commitHash ?? null, 0);
+  const result = updatePlugin(pluginName, gitUrl, tracked, commitHash ?? null, 0);
   if (!result.success) {
     const err = new Error(`could not set up ${pluginName} - see the updater log`);
     emitPluginUpdateFailed(pluginName, err);
@@ -223,9 +228,26 @@ export async function updatePluginPublic(
   // a plain "Update now" (no commitHash) clears any earlier pin so it can move past it
   if (commitHash) setPluginCommitHash(configDir, pluginName, commitHash);
   else setPluginCommitHash(configDir, pluginName, null);
-  await deployToExecutionDir(pluginName, path.join(configDir, "plugin"), result.changed, configDir);
+  await deployToExecutionDir(pluginName, getPluginDir(configDir), result.changed, configDir);
   if (result.changed) onInstalled(pluginName, getLocalHead(pluginName), previousVersion, "manual");
   else registerAppFromClone(pluginName);
+}
+
+export interface PluginChannelState {
+  onExperimental: boolean;
+  experimentalAvailable: boolean | null;
+}
+
+// The single answer both the dashboard and the loader TUI render from. They cannot share the
+// pure helpers (one bundles this module, the other loads it at runtime), so they share this.
+export function pluginChannelState(configDir: string, name: string): PluginChannelState {
+  const entry = getPlugins(configDir).find((p) => p.name === name);
+  const experimentalAvailable = readUpdateCache(configDir).plugins[name]?.experimentalAvailable ?? null;
+  if (!entry) return { onExperimental: false, experimentalAvailable };
+  return {
+    onExperimental: tracksExperimental(entry, readUpdaterConfig(configDir), experimentalAvailable),
+    experimentalAvailable,
+  };
 }
 
 // core-loader's downgrade TUI action calls this SYNCHRONOUSLY and expects a string
@@ -374,7 +396,9 @@ async function earlyLaunchInScope(configDir: string, plugins: Plugin[], trigger:
 // The update surface, re-exported so a consumer reaches it the same way it reaches
 // updatePluginPublic: the registry side-effect is wired here, once.
 export { checkUpdates };
-export { checkPluginHealth, checkAllPluginHealth, repairPlugin, type PluginHealth } from "./repair.js";
+export { checkPluginHealth, checkAllPluginHealth, missingPluginArtifacts, repairPlugin, type PluginHealth } from "./repair.js";
+export { homeLibraries, sharedLibraries, pluginDependencies, removeLibrary, orphanedLibraries, type HomeLibraries, type InstalledLibrary, type PluginDependencies } from "./libraries.js";
+export { pluginData, removeDataPaths, type PluginDataEntry } from "./plugin-data.js";
 export { updaterSchema };
 
 export function updateOne(configDir: string, name: string) {
