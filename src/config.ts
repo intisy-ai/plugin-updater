@@ -3,6 +3,7 @@ import path from "path";
 import { isOpencodeHookInvocation } from "./env.js";
 import { writeLog } from "./log.js";
 import type { Plugin } from "./types.js";
+import type { PluginChannel } from "./channel.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { getApps } from "@intisy-ai/core";
 
@@ -119,6 +120,13 @@ export function setPluginEnabled(configDir: string, name: string, enabled: boole
 
 export function setPluginAutoUpdate(configDir: string, name: string, autoUpdate: boolean): boolean {
   return setPluginField(configDir, name, (entry) => { entry.autoUpdate = autoUpdate; });
+}
+
+export function setPluginChannel(configDir: string, name: string, channel: PluginChannel): boolean {
+  return setPluginField(configDir, name, (entry) => {
+    if (channel === "inherit") delete entry.channel;
+    else entry.channel = channel;
+  });
 }
 
 // Persists (or clears) a plugin's pinned commit so a downgrade survives the next
