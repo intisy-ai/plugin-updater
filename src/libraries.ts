@@ -109,17 +109,28 @@ export function orphanedLibraries(configDir: string): string[] {
   return sharedLibraries(configDir).filter((library) => library.usedBy.length === 0).map((library) => library.specifier);
 }
 
+function installedVersion(dir: string): string {
+  const pkg = readPackage(dir);
+  return typeof pkg?.version === "string" ? pkg.version : "";
+}
+
 // A plugin's own dependencies, reported at the version actually installed next to it
 // rather than the range its package.json asks for. A declared dependency that never got
 // installed is still listed, with an empty version, because its absence is the
 // interesting part.
+//
+// Each is named by the specifier the plugin IMPORTS it by, never by the `name` in the
+// installed copy's package.json. A `file:` submodule install copies that package.json
+// verbatim, so an unscoped library reads as `core` next to the plugin and as
+// `@intisy-ai/core` in the shared store (which materializing rewrites) — one library
+// reported twice, under two names.
 export function pluginDependencies(configDir: string, plugin: string): InstalledLibrary[] {
   const cloneDir = path.join(getReposDir(configDir), plugin);
   const declared = readPackage(cloneDir)?.dependencies;
   if (!declared) return [];
   const store = path.join(cloneDir, "node_modules");
   return Object.keys(declared)
-    .map((name) => readLibrary(path.join(store, ...name.split("/"))) ?? { specifier: name, version: "", usedBy: [] })
+    .map((specifier) => ({ specifier, version: installedVersion(path.join(store, ...specifier.split("/"))), usedBy: [plugin] }))
     .sort(byName);
 }
 

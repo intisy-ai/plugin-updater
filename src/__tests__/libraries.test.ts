@@ -81,7 +81,7 @@ describe("pluginDependencies", () => {
     const home = makeHome();
     makeClone(home, "wakatime-sync", { dependencies: { undici: "^6.0.0" }, installed: { undici: "6.19.2" } });
 
-    expect(pluginDependencies(home, "wakatime-sync")).toEqual([{ specifier: "undici", version: "6.19.2", usedBy: [] }]);
+    expect(pluginDependencies(home, "wakatime-sync")).toEqual([{ specifier: "undici", version: "6.19.2", usedBy: ["wakatime-sync"] }]);
   });
 
   // A dependency that never got installed is the one worth seeing, so it is listed rather
@@ -90,7 +90,20 @@ describe("pluginDependencies", () => {
     const home = makeHome();
     makeClone(home, "wakatime-sync", { dependencies: { undici: "^6.0.0" } });
 
-    expect(pluginDependencies(home, "wakatime-sync")).toEqual([{ specifier: "undici", version: "", usedBy: [] }]);
+    expect(pluginDependencies(home, "wakatime-sync")).toEqual([{ specifier: "undici", version: "", usedBy: ["wakatime-sync"] }]);
+  });
+
+  // A `file:` submodule install copies the library's own package.json, whose name is
+  // unscoped, so reading the name off disk reported the same library twice: once as `core`
+  // here and once as `@intisy-ai/core` from the store.
+  it("names a dependency by the specifier the plugin imports, not the installed copy's own name", () => {
+    const home = makeHome();
+    makeClone(home, "custom-auth", { dependencies: { "@intisy-ai/core": "file:core" } });
+    // What npm leaves behind for a `file:` dependency: the library's own package.json,
+    // whose name is the unscoped one.
+    writePackage(join(home, "repos", "custom-auth", "node_modules", "@intisy-ai", "core"), { name: "core", version: "0.3.1" });
+
+    expect(pluginDependencies(home, "custom-auth")).toEqual([{ specifier: "@intisy-ai/core", version: "0.3.1", usedBy: ["custom-auth"] }]);
   });
 
   it("is empty for a plugin that declares none", () => {
@@ -109,6 +122,6 @@ describe("homeLibraries", () => {
 
     const result = homeLibraries(home);
     expect(result.shared).toEqual([{ specifier: "@intisy-ai/core", version: "2.1.0", usedBy: ["stub-auth", "wakatime-sync"] }]);
-    expect(result.plugins).toEqual([{ plugin: "wakatime-sync", dependencies: [{ specifier: "undici", version: "6.19.2", usedBy: [] }] }]);
+    expect(result.plugins).toEqual([{ plugin: "wakatime-sync", dependencies: [{ specifier: "undici", version: "6.19.2", usedBy: ["wakatime-sync"] }] }]);
   });
 });
