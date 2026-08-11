@@ -138,4 +138,12 @@ describe("pluginChannelState", () => {
     const dir = makeHomeWithCache([], {}, {});
     expect(pluginChannelState(dir, "ghost")).toEqual({ onExperimental: false, experimentalAvailable: null });
   });
+
+  // Distinguishes "the cache is never consulted for an unregistered plugin" from the
+  // correct behavior: onExperimental stays false (no entry means no channel choice)
+  // while experimentalAvailable still reflects what the cache knows.
+  it("reports the cache's answer for a plugin the home has no entry for", () => {
+    const dir = makeHomeWithCache([], {}, { ghost: true });
+    expect(pluginChannelState(dir, "ghost")).toEqual({ onExperimental: false, experimentalAvailable: true });
+  });
 });
