@@ -3,9 +3,9 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { registerPlugin, setPluginEnabled, setPluginAutoUpdate, getPlugins } from "./config.js";
-import { UPDATER_DEFAULTS, UPDATER_NAME, readUpdaterConfig } from "./schema.js";
+import { UPDATER_DEFAULTS, UPDATER_NAME } from "./schema.js";
 // @ts-ignore: generated bundle, no .d.ts
-import { getCapabilities, getConfigDefaults } from "@intisy-ai/core";
+import { getCapabilities, loadConfig } from "@intisy-ai/core";
 
 let dir: string;
 
@@ -57,13 +57,33 @@ describe("channel defaults", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("with no config file on disk, readUpdaterConfig returns empty; but the registered defaults via getConfigDefaults still include the channel settings", () => {
-    const diskConfig = readUpdaterConfig(tempDir);
+  it("with no config file on disk, loadConfig returns empty; merge with defaults yields the channel settings", () => {
+    const diskConfig = loadConfig(UPDATER_NAME, tempDir);
     expect(diskConfig).toEqual({});
 
-    const registered = getConfigDefaults(UPDATER_NAME);
-    expect(registered.experimental).toBe(false);
-    expect(registered.experimental_branch).toBe("experimental");
+    const merged = { ...UPDATER_DEFAULTS, ...diskConfig };
+    expect(merged.experimental).toBe(false);
+    expect(merged.experimental_branch).toBe("experimental");
+  });
+
+  it("with a config file on disk, the merge resolves file values over defaults", () => {
+    fs.mkdirSync(path.join(tempDir, "config"), { recursive: true });
+    const configFile = path.join(tempDir, "config", `${UPDATER_NAME}.json`);
+    fs.writeFileSync(configFile, JSON.stringify({
+      experimental: true,
+      experimental_branch: "next",
+      other_field: "value"
+    }), "utf8");
+
+    const diskConfig = loadConfig(UPDATER_NAME, tempDir);
+    expect(diskConfig.experimental).toBe(true);
+    expect(diskConfig.experimental_branch).toBe("next");
+    expect(diskConfig.other_field).toBe("value");
+
+    const merged = { ...UPDATER_DEFAULTS, ...diskConfig };
+    expect(merged.experimental).toBe(true);
+    expect(merged.experimental_branch).toBe("next");
+    expect(merged.logging).toBe(true);
   });
 
   it("the registered field list contains both channel settings and every non-dotted key corresponds to a default", () => {
