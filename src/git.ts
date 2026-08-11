@@ -39,13 +39,13 @@ export async function precomputeRemoteHashes(
 // answer. A remote that cannot be reached is left OUT of the map: absent means unknown,
 // which the resolver treats differently from a definite "no such branch".
 export async function detectExperimentalBranches(
-  plugins: Array<{ name: string; url?: string; enabled?: boolean }>,
+  plugins: Array<{ name: string; url?: string; enabled?: boolean; commitHash?: string | null }>,
   branch: string,
   timeoutMs = 20000,
 ): Promise<Map<string, boolean>> {
   const out = new Map<string, boolean>();
   await Promise.all((plugins || []).map(async (p) => {
-    if (!p || !p.url || p.enabled === false) return;
+    if (!p || !p.url || p.enabled === false || p.commitHash) return;
     try {
       const { stdout } = await execAsync(`git ls-remote --heads ${p.url} ${branch}`, {
         timeout: timeoutMs,

@@ -57,8 +57,10 @@ export async function checkUpdates(configDir: string, plugins?: Plugin[]): Promi
     }, false, checkedAt);
   }
 
-  const remoteHashes = await precomputeRemoteHashes(list);
-  const detected = await detectExperimentalBranches(list, experimentalBranchName(readUpdaterConfig(configDir)));
+  const [remoteHashes, detected] = await Promise.all([
+    precomputeRemoteHashes(list),
+    detectExperimentalBranches(list, experimentalBranchName(readUpdaterConfig(configDir))),
+  ]);
   for (const plugin of list) {
     const localHead = getLocalHead(plugin.name);
     const remoteHead = remoteHashes.get(plugin.name) ?? null;

@@ -75,6 +75,18 @@ function seedBehindClone(name: string, entryOverrides: Record<string, unknown> =
   return { firstHash, secondHash };
 }
 
+// a clone one commit behind an origin that also carries the channel branch
+function seedBehindCloneWithChannel(name: string): { firstHash: string; secondHash: string } {
+  const origin = join(originsRoot, "origin-" + name);
+  const firstHash = initRepo(origin);
+  git("git branch experimental", origin);
+  git(`git clone --branch main "${origin}" "${name}"`, join(configDir, "repos"));
+  const secondHash = commitMore(origin, "two");
+  entries.push({ name, url: origin, branch: "main", enabled: true });
+  writeFileSync(getPluginsPath(configDir), JSON.stringify(entries), "utf8");
+  return { firstHash, secondHash };
+}
+
 function writeConfig(values: Record<string, unknown>): void {
   writeFileSync(join(configDir, "config", "plugin-updater.json"), JSON.stringify({ self_update: false, ...values }), "utf8");
 }
@@ -183,6 +195,19 @@ describe("runAutoUpdate", () => {
 
     expect(outcome.updated).toEqual(["plain"]);
     expect(head("plain")).toBe(secondHash);
+  }, 60000);
+
+  // The pull path re-records localHead/remoteHead after checkUpdates already detected
+  // the channel branch; that re-record must forward the detected value, not drop it.
+  it("carries a detected channel branch forward across a pull instead of resetting it to null", async () => {
+    seedBehindCloneWithChannel("channel-plugin");
+    writeConfig({ auto_update_mode: "update" });
+
+    const { runAutoUpdate } = await import("../updates.js");
+    const outcome = await runAutoUpdate(configDir, { trigger: "loader" });
+
+    expect(outcome.updated).toEqual(["channel-plugin"]);
+    expect(readCache().plugins["channel-plugin"].experimentalAvailable).toBe(true);
   }, 60000);
 });
 
