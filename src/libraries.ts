@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getReposDir } from "./env.js";
-import { declaredLibraries, sharedStoreDir } from "./shared-libs.js";
+import { declaredLibraryTree, sharedStoreDir } from "./shared-libs.js";
 import { writeLog } from "./log.js";
 
 // One resolvable package on disk, whether it came from the shared store or a plugin's
@@ -66,17 +66,18 @@ function byName(a: InstalledLibrary, b: InstalledLibrary): number {
 }
 
 // Which plugins declare each shared library, taken from the clones' own submodules so it
-// stays true for a library added by nothing more than a submodule.
+// stays true for a library added by nothing more than a submodule. A plugin can reach the
+// same library by two paths in its tree, so each is credited to it once.
 function declarersBySpecifier(reposDir: string): Map<string, string[]> {
-  const declarers = new Map<string, string[]>();
+  const declarers = new Map<string, Set<string>>();
   for (const plugin of directories(reposDir)) {
-    for (const library of declaredLibraries(path.join(reposDir, plugin))) {
+    for (const library of declaredLibraryTree(path.join(reposDir, plugin))) {
       const existing = declarers.get(library.specifier);
-      if (existing) existing.push(plugin);
-      else declarers.set(library.specifier, [plugin]);
+      if (existing) existing.add(plugin);
+      else declarers.set(library.specifier, new Set([plugin]));
     }
   }
-  return declarers;
+  return new Map([...declarers].map(([specifier, plugins]) => [specifier, [...plugins]]));
 }
 
 export function sharedLibraries(configDir: string): InstalledLibrary[] {

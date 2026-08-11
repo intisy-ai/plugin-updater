@@ -46,13 +46,11 @@ export function submoduleTree(sourceDir: string, relative = ""): string[] {
   return found;
 }
 
-// The library set comes from the clone's own .gitmodules and each submodule's
-// package name, never from a list here: adding a library is then a submodule and
-// nothing else. A submodule without a usable package.json is skipped rather than
-// guessed at, since its specifier would be a fabrication.
-export function declaredLibraries(sourceDir: string): SharedLibrary[] {
+// A submodule without a usable package.json is skipped rather than guessed at, since its
+// specifier would be a fabrication.
+function librariesAt(sourceDir: string, relativePaths: string[]): SharedLibrary[] {
   const libraries: SharedLibrary[] = [];
-  for (const relative of submodulePaths(readGitmodules(sourceDir))) {
+  for (const relative of relativePaths) {
     const dir = path.join(sourceDir, relative);
     let name: unknown;
     try {
@@ -64,6 +62,20 @@ export function declaredLibraries(sourceDir: string): SharedLibrary[] {
     libraries.push({ dir, specifier: name.startsWith("@") ? name : `${SCOPE}/${name}` });
   }
   return libraries;
+}
+
+// The library set comes from the clone's own .gitmodules and each submodule's
+// package name, never from a list here: adding a library is then a submodule and
+// nothing else. These are what the clone ships, so they are what gets materialized.
+export function declaredLibraries(sourceDir: string): SharedLibrary[] {
+  return librariesAt(sourceDir, submodulePaths(readGitmodules(sourceDir)));
+}
+
+// The same set widened to the whole submodule tree. Asking "does anything still declare this
+// library" has to see the nested ones too (core-proxy nests core-ir), or a store entry a
+// plugin genuinely depends on is credited to nobody and reads as left over.
+export function declaredLibraryTree(sourceDir: string): SharedLibrary[] {
+  return librariesAt(sourceDir, submoduleTree(sourceDir));
 }
 
 // A declared library with no build output cannot be put in a home's store, so any plugin

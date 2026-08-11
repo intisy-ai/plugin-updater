@@ -22,6 +22,15 @@ function makeHome(): string {
 
 // A clone that declares its libraries as submodules, which is where the "used by" answer
 // comes from. Its own npm dependencies are declared and installed separately.
+function writeSubmodules(dir: string, submodules: Record<string, string>): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, ".gitmodules"),
+    Object.keys(submodules).map((p) => `[submodule "${p}"]\n\tpath = ${p}\n\turl = https://example.invalid/${p}\n`).join(""),
+  );
+  for (const [relative, name] of Object.entries(submodules)) writePackage(join(dir, relative), { name });
+}
+
 function makeClone(home: string, plugin: string, options: {
   submodules?: Record<string, string>;
   dependencies?: Record<string, string>;
@@ -30,13 +39,7 @@ function makeClone(home: string, plugin: string, options: {
   const cloneDir = join(home, "repos", plugin);
   mkdirSync(cloneDir, { recursive: true });
   const submodules = options.submodules ?? {};
-  if (Object.keys(submodules).length > 0) {
-    writeFileSync(
-      join(cloneDir, ".gitmodules"),
-      Object.keys(submodules).map((p) => `[submodule "${p}"]\n\tpath = ${p}\n\turl = https://example.invalid/${p}\n`).join(""),
-    );
-    for (const [relative, name] of Object.entries(submodules)) writePackage(join(cloneDir, relative), { name });
-  }
+  if (Object.keys(submodules).length > 0) writeSubmodules(cloneDir, submodules);
   if (options.dependencies) writePackage(cloneDir, { name: plugin, dependencies: options.dependencies });
   for (const [name, version] of Object.entries(options.installed ?? {})) {
     writePackage(join(cloneDir, "node_modules", ...name.split("/")), { name, version });
@@ -69,6 +72,31 @@ describe("sharedLibraries", () => {
 
     const core = sharedLibraries(home).find((l) => l.specifier === "@intisy-ai/core");
     expect(core?.usedBy).toEqual(["stub-auth", "wakatime-sync"]);
+  });
+
+  // A library carried inside another library has a plugin behind it just the same. Counting
+  // only top-level submodules credited it to nobody, which is how a load-bearing library
+  // reads as left over.
+  it("credits a library nested inside another library to the plugin carrying both", () => {
+    const home = makeHome();
+    shareLibrary(home, "@intisy-ai/core-ir", "0.2.0");
+    makeClone(home, "claude-code-loader", { submodules: { "claude-code-proxy": "claude-code-proxy" } });
+    const proxyDir = join(home, "repos", "claude-code-loader", "claude-code-proxy");
+    writeSubmodules(proxyDir, { "core-proxy": "core-proxy" });
+    writeSubmodules(join(proxyDir, "core-proxy"), { "core-ir": "core-ir" });
+
+    const ir = sharedLibraries(home).find((l) => l.specifier === "@intisy-ai/core-ir");
+    expect(ir?.usedBy).toEqual(["claude-code-loader"]);
+  });
+
+  it("credits a plugin once when two paths through its tree reach the same library", () => {
+    const home = makeHome();
+    shareLibrary(home, "@intisy-ai/core-ir", "0.2.0");
+    makeClone(home, "claude-code-loader", { submodules: { "core-ir": "core-ir", "claude-code-proxy": "claude-code-proxy" } });
+    writeSubmodules(join(home, "repos", "claude-code-loader", "claude-code-proxy"), { "core-ir": "core-ir" });
+
+    const ir = sharedLibraries(home).find((l) => l.specifier === "@intisy-ai/core-ir");
+    expect(ir?.usedBy).toEqual(["claude-code-loader"]);
   });
 
   it("is empty when the home has no store yet", () => {
