@@ -3,7 +3,9 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { registerPlugin, setPluginEnabled, setPluginAutoUpdate, getPlugins } from "./config.js";
-import { UPDATER_DEFAULTS } from "./schema.js";
+import { UPDATER_DEFAULTS, UPDATER_NAME, readUpdaterConfig } from "./schema.js";
+// @ts-ignore: generated bundle, no .d.ts
+import { getCapabilities, getConfigDefaults } from "@intisy-ai/core";
 
 let dir: string;
 
@@ -45,8 +47,37 @@ describe("plugins.json writers", () => {
 });
 
 describe("channel defaults", () => {
-  it("ships the channel off, naming the branch it would use", () => {
-    expect(UPDATER_DEFAULTS.experimental).toBe(false);
-    expect(UPDATER_DEFAULTS.experimental_branch).toBe("experimental");
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pu-channel-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("with no config file on disk, readUpdaterConfig returns empty; but the registered defaults via getConfigDefaults still include the channel settings", () => {
+    const diskConfig = readUpdaterConfig(tempDir);
+    expect(diskConfig).toEqual({});
+
+    const registered = getConfigDefaults(UPDATER_NAME);
+    expect(registered.experimental).toBe(false);
+    expect(registered.experimental_branch).toBe("experimental");
+  });
+
+  it("the registered field list contains both channel settings and every non-dotted key corresponds to a default", () => {
+    const caps = getCapabilities(UPDATER_NAME);
+    const fieldKeys = (caps.fields || []).map((f: { key: string }) => f.key);
+
+    expect(fieldKeys).toContain("experimental");
+    expect(fieldKeys).toContain("experimental_branch");
+
+    const defaultKeys = Object.keys(UPDATER_DEFAULTS).filter(k => !k.includes("."));
+    for (const fieldKey of fieldKeys) {
+      if (!fieldKey.includes(".")) {
+        expect(defaultKeys).toContain(fieldKey);
+      }
+    }
   });
 });
