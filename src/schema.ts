@@ -15,6 +15,8 @@ export const UPDATER_DEFAULTS: Record<string, unknown> = {
   self_update: true,
   update_on_launch: true,
   auto_update_mode: "update",
+  experimental: false,
+  experimental_branch: "experimental",
   auto_update_triggers: { loader: true, app: true, cairn: true },
 };
 
@@ -30,6 +32,10 @@ defineCapabilities(UPDATER_NAME, {
     { key: "auto_update_mode", type: "select", label: "Automatic updates", group: "Updates",
       description: "off checks nothing on startup, check only records what is available, update also installs it.",
       options: [{ value: "off", label: "off" }, { value: "check", label: "check" }, { value: "update", label: "update" }] },
+    { key: "experimental", type: "boolean", label: "Experimental builds", group: "Updates",
+      description: "Track the pre-release branch for plugins that have not chosen for themselves." },
+    { key: "experimental_branch", type: "string", label: "Experimental branch", group: "Updates",
+      description: "Which branch the experimental channel means." },
     { key: "auto_update_triggers.loader", type: "boolean", label: "Check when the launcher menu opens", group: "Triggers" },
     { key: "auto_update_triggers.app", type: "boolean", label: "Check when the app starts", group: "Triggers" },
     { key: "auto_update_triggers.cairn", type: "boolean", label: "Check when the dashboard starts", group: "Triggers" },

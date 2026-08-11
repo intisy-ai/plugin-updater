@@ -3,6 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { registerPlugin, setPluginEnabled, setPluginAutoUpdate, getPlugins } from "./config.js";
+import { UPDATER_DEFAULTS } from "./schema.js";
 
 let dir: string;
 
@@ -40,5 +41,12 @@ describe("plugins.json writers", () => {
     expect(setPluginEnabled(dir, "nope", true)).toBe(false);
     registerPlugin(dir, "plugin-a", "u1");
     expect(setPluginAutoUpdate(dir, "nope", true)).toBe(false);
+  });
+});
+
+describe("channel defaults", () => {
+  it("ships the channel off, naming the branch it would use", () => {
+    expect(UPDATER_DEFAULTS.experimental).toBe(false);
+    expect(UPDATER_DEFAULTS.experimental_branch).toBe("experimental");
   });
 });
