@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { pluginData, removePluginData } from "../plugin-data.js";
+import { pluginData, removeDataPaths } from "../plugin-data.js";
 
 let homeDir: string | undefined;
 afterEach(() => {
@@ -89,11 +89,11 @@ describe("pluginData", () => {
   });
 });
 
-describe("removePluginData", () => {
-  it("deletes exactly what it reported and leaves everything else standing", () => {
+describe("removeDataPaths", () => {
+  it("deletes exactly what it was given and leaves everything else standing", () => {
     const home = makeHome();
 
-    const removed = removePluginData(home, "sync-bridge");
+    const removed = removeDataPaths(home, pluginData(home, "sync-bridge").map((entry) => entry.path));
 
     expect(removed).toContain("config/sync-bridge.json");
     expect(existsSync(join(home, "config", "sync-bridge.json"))).toBe(false);
@@ -108,12 +108,20 @@ describe("removePluginData", () => {
     const home = makeHome();
     write(home, "state/mirror/db.sqlite", "data");
 
-    removePluginData(home, "sync-bridge", ["state/mirror"]);
+    removeDataPaths(home, ["state/mirror"]);
 
     expect(existsSync(join(home, "state", "mirror"))).toBe(false);
   });
 
   it("removes nothing for a plugin that left nothing behind", () => {
-    expect(removePluginData(makeHome(), "never-installed")).toEqual([]);
+    const home = makeHome();
+    expect(removeDataPaths(home, pluginData(home, "never-installed").map((entry) => entry.path))).toEqual([]);
+  });
+
+  // The list arrives over IPC, so it is caller-supplied input, not something to trust.
+  it("refuses a path outside the home, however it is spelled", () => {
+    const home = makeHome();
+    expect(removeDataPaths(home, ["../escape", "/etc/passwd", "config/../../escape"])).toEqual([]);
+    expect(existsSync(join(home, "config", "accounts.json"))).toBe(true);
   });
 });

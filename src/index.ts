@@ -376,7 +376,7 @@ async function earlyLaunchInScope(configDir: string, plugins: Plugin[], trigger:
 export { checkUpdates };
 export { checkPluginHealth, checkAllPluginHealth, missingPluginArtifacts, repairPlugin, type PluginHealth } from "./repair.js";
 export { homeLibraries, sharedLibraries, pluginDependencies, removeLibrary, orphanedLibraries, type HomeLibraries, type InstalledLibrary, type PluginDependencies } from "./libraries.js";
-export { pluginData, removePluginData, type PluginDataEntry } from "./plugin-data.js";
+export { pluginData, removeDataPaths, type PluginDataEntry } from "./plugin-data.js";
 export { updaterSchema };
 
 export function updateOne(configDir: string, name: string) {

@@ -104,22 +104,25 @@ export function pluginData(configDir: string, plugin: string, declared: string[]
   return entries.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-// Deletes exactly what pluginData reported, re-resolved and re-checked here: the caller
-// passes back relative paths, and a path that has since moved outside the home is skipped
-// rather than trusted.
-export function removePluginData(configDir: string, plugin: string, declared: string[] = []): string[] {
+// Deletes exactly the paths it is given, which are the ones pluginData reported and a
+// confirmation showed. Taking the list rather than re-deriving it matters because the
+// declaration saying where a plugin keeps state lives in the plugin's own bundle: by the time
+// an uninstall has finished there is nothing left to ask. Each path is re-resolved and
+// re-checked here, so a caller cannot name anything outside the home.
+export function removeDataPaths(configDir: string, paths: string[]): string[] {
   const removed: string[] = [];
   const root = path.resolve(configDir);
-  for (const entry of pluginData(configDir, plugin, declared)) {
-    const target = path.resolve(configDir, entry.path);
+  for (const entry of paths) {
+    const target = path.resolve(configDir, entry);
     if (!target.startsWith(root + path.sep)) continue;
     try {
+      if (!fs.existsSync(target)) continue;
       fs.rmSync(target, { recursive: true, force: true });
-      removed.push(entry.path);
+      removed.push(entry);
     } catch (error) {
-      writeLog(`Could not remove ${entry.path} for ${plugin}: ${String(error)}`, true);
+      writeLog(`Could not remove ${entry}: ${String(error)}`, true);
     }
   }
-  if (removed.length > 0) writeLog(`Removed ${removed.length} data path(s) for ${plugin}`);
+  if (removed.length > 0) writeLog(`Removed ${removed.length} data path(s) under ${configDir}`);
   return removed;
 }
