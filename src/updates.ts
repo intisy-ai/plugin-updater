@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import { writeLog } from "./log.js";
 import { getPlugins, readOpencodeJson } from "./config.js";
-import { precomputeRemoteHashes, getLocalHead, updatePlugin } from "./git.js";
+import { precomputeRemoteHashes, detectExperimentalBranches, getLocalHead, updatePlugin } from "./git.js";
 import { precomputeLatestNpmVersions, resolveNpmPluginVersion } from "./npm.js";
 import {
   readUpdateCache,
@@ -19,6 +19,7 @@ import { emitUpdatesAvailable, emitPluginUpdated, emitPluginInstalled, emitPlugi
 import { deployToExecutionDir } from "./deploy.js";
 import { shouldPull, triggerEnabled, type Trigger } from "./policy.js";
 import { readUpdaterConfig } from "./schema.js";
+import { experimentalBranchName } from "./channel.js";
 import type { Plugin } from "./types.js";
 import { getReposDir, getPluginDir } from "./env.js";
 
@@ -52,10 +53,12 @@ export async function checkUpdates(configDir: string, plugins?: Plugin[]): Promi
     if (updateAvailable) available.push(name);
     recordCacheEntry(cache, previousCache, name, {
       kind: "npm", installedVersion, localHead: null, remoteHead: null, latestVersion, updateAvailable,
+      experimentalAvailable: null,
     }, false, checkedAt);
   }
 
   const remoteHashes = await precomputeRemoteHashes(list);
+  const detected = await detectExperimentalBranches(list, experimentalBranchName(readUpdaterConfig(configDir)));
   for (const plugin of list) {
     const localHead = getLocalHead(plugin.name);
     const remoteHead = remoteHashes.get(plugin.name) ?? null;
@@ -63,6 +66,7 @@ export async function checkUpdates(configDir: string, plugins?: Plugin[]): Promi
     if (updateAvailable) available.push(plugin.name);
     recordCacheEntry(cache, previousCache, plugin.name, {
       kind: "git", installedVersion: null, localHead, remoteHead, latestVersion: null, updateAvailable,
+      experimentalAvailable: detected.get(plugin.name) ?? previousCache.plugins[plugin.name]?.experimentalAvailable ?? null,
     }, false, checkedAt);
   }
 
@@ -166,6 +170,7 @@ async function pullCandidates(configDir: string, check: CheckResult, opts: PullO
       recordCacheEntry(cache, previousCache, plugin.name, {
         kind: "git", installedVersion: null, localHead, remoteHead: entry?.remoteHead ?? null,
         latestVersion: null, updateAvailable: gitUpdateAvailable(localHead, entry?.remoteHead ?? null),
+        experimentalAvailable: entry?.experimentalAvailable ?? null,
       }, result.changed, check.checkedAt);
       if (!result.success) {
         emitPluginUpdateFailed(plugin.name, new Error(`update failed for ${plugin.name} - see the updater log`));

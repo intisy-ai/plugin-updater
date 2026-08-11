@@ -12,6 +12,9 @@ export interface CachePluginEntry {
   remoteHead: string | null;  // git only
   latestVersion: string | null; // npm only (registry latest)
   updateAvailable: boolean;
+  // null means unknown (never checked, or the check failed), which is not the same as
+  // false: only a definite absence may send a plugin back to stable.
+  experimentalAvailable: boolean | null;
   updatedAt: string | null; // set when THIS run actually applied an update
 }
 

@@ -34,6 +34,28 @@ export async function precomputeRemoteHashes(
   }));
   return out;
 }
+
+// Asked of the URL rather than a clone, so a plugin that is not installed yet still gets an
+// answer. A remote that cannot be reached is left OUT of the map: absent means unknown,
+// which the resolver treats differently from a definite "no such branch".
+export async function detectExperimentalBranches(
+  plugins: Array<{ name: string; url?: string; enabled?: boolean }>,
+  branch: string,
+  timeoutMs = 20000,
+): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  await Promise.all((plugins || []).map(async (p) => {
+    if (!p || !p.url || p.enabled === false) return;
+    try {
+      const { stdout } = await execAsync(`git ls-remote --heads ${p.url} ${branch}`, {
+        timeout: timeoutMs,
+        env: { ...process.env, GCM_INTERACTIVE: "never", GIT_TERMINAL_PROMPT: "0" },
+      });
+      out.set(p.name, String(stdout).trim().length > 0);
+    } catch { /* unreachable remote: leave unset so the caller records unknown */ }
+  }));
+  return out;
+}
 // @ts-ignore — generated bundle, no .d.ts
 import { loadConfig } from "@intisy-ai/core";
 
