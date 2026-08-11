@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveChannel, resolveBranch, experimentalBranchName, globalExperimental, tracksExperimental } from "../channel.js";
+import { pluginChannelState } from "../index.js";
+import type { Plugin } from "../types.js";
 
 const OFF = { experimental: false };
 const ON = { experimental: true };
@@ -93,5 +98,44 @@ describe("tracksExperimental", () => {
 
   it("is false when the branch is known to be absent", () => {
     expect(tracksExperimental({ channel: "experimental" }, ON, false)).toBe(false);
+  });
+});
+
+let home: string | undefined;
+afterEach(() => {
+  if (home) rmSync(home, { recursive: true, force: true });
+  home = undefined;
+});
+
+function makeHomeWithCache(
+  entries: Plugin[],
+  updaterConfig: Record<string, unknown>,
+  detected: Record<string, boolean>,
+): string {
+  home = mkdtempSync(join(tmpdir(), "pu-channelstate-"));
+  mkdirSync(join(home, "config"), { recursive: true });
+  mkdirSync(join(home, "cache"), { recursive: true });
+  writeFileSync(join(home, "config", "plugins.json"), JSON.stringify(entries, null, 2), "utf8");
+  writeFileSync(join(home, "config", "plugin-updater.json"), JSON.stringify(updaterConfig, null, 2), "utf8");
+  const plugins: Record<string, unknown> = {};
+  for (const [name, experimentalAvailable] of Object.entries(detected)) {
+    plugins[name] = {
+      kind: "git", installedVersion: null, localHead: null, remoteHead: null,
+      latestVersion: null, updateAvailable: false, experimentalAvailable, updatedAt: null,
+    };
+  }
+  writeFileSync(join(home, "cache", "plugin-updates.json"), JSON.stringify({ checkedAt: new Date().toISOString(), plugins }, null, 2), "utf8");
+  return home;
+}
+
+describe("pluginChannelState", () => {
+  it("answers from the entry, the home's config and the cache together", () => {
+    const dir = makeHomeWithCache([{ name: "demo", url: "u" }], { experimental: true }, { demo: true });
+    expect(pluginChannelState(dir, "demo")).toEqual({ onExperimental: true, experimentalAvailable: true });
+  });
+
+  it("reports an unregistered plugin as off without throwing", () => {
+    const dir = makeHomeWithCache([], {}, {});
+    expect(pluginChannelState(dir, "ghost")).toEqual({ onExperimental: false, experimentalAvailable: null });
   });
 });

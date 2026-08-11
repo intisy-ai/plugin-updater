@@ -7,9 +7,11 @@ import { deployToExecutionDir } from "./deploy.js";
 import { syncAllAcrossApps } from "./syncbridge.js";
 import { checkUpdates, runAutoUpdate, updateOne as updateOneInHome, updateAll as updateAllInHome } from "./updates.js";
 import { resolveMode, type Trigger } from "./policy.js";
+import { resolveBranch, tracksExperimental } from "./channel.js";
+import { readUpdateCache } from "./cache.js";
 // Importing this registers the config defaults and the capability schema, which must
 // happen before the CLI guard below so `config schema` answers.
-import { updaterSchema } from "./schema.js";
+import { updaterSchema, readUpdaterConfig } from "./schema.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
@@ -210,10 +212,13 @@ export async function updatePluginPublic(
   if (isOpencodeHookInvocation(pluginName)) return {};
   writeLog(`Public API update call for ${pluginName}`);
   const configDir = getAppConfigDir(getAppName());
+  const entry = getPlugins(configDir).find((p) => p.name === pluginName);
+  const detected = readUpdateCache(configDir).plugins[pluginName]?.experimentalAvailable ?? null;
+  const tracked = branch ?? resolveBranch(entry ?? {}, readUpdaterConfig(configDir), detected);
   const repoDir = path.join(getReposDir(configDir), pluginName);
   const previousVersion = fs.existsSync(repoDir) ? getLocalHead(pluginName) : null;
   // interval 0: an explicit update request must never fast-path-skip
-  const result = updatePlugin(pluginName, gitUrl, branch, commitHash ?? null, 0);
+  const result = updatePlugin(pluginName, gitUrl, tracked, commitHash ?? null, 0);
   if (!result.success) {
     const err = new Error(`could not set up ${pluginName} - see the updater log`);
     emitPluginUpdateFailed(pluginName, err);
@@ -226,6 +231,23 @@ export async function updatePluginPublic(
   await deployToExecutionDir(pluginName, getPluginDir(configDir), result.changed, configDir);
   if (result.changed) onInstalled(pluginName, getLocalHead(pluginName), previousVersion, "manual");
   else registerAppFromClone(pluginName);
+}
+
+export interface PluginChannelState {
+  onExperimental: boolean;
+  experimentalAvailable: boolean | null;
+}
+
+// The single answer both the dashboard and the loader TUI render from. They cannot share the
+// pure helpers (one bundles this module, the other loads it at runtime), so they share this.
+export function pluginChannelState(configDir: string, name: string): PluginChannelState {
+  const entry = getPlugins(configDir).find((p) => p.name === name);
+  const experimentalAvailable = readUpdateCache(configDir).plugins[name]?.experimentalAvailable ?? null;
+  if (!entry) return { onExperimental: false, experimentalAvailable };
+  return {
+    onExperimental: tracksExperimental(entry, readUpdaterConfig(configDir), experimentalAvailable),
+    experimentalAvailable,
+  };
 }
 
 // core-loader's downgrade TUI action calls this SYNCHRONOUSLY and expects a string

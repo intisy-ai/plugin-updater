@@ -19,7 +19,7 @@ import { emitUpdatesAvailable, emitPluginUpdated, emitPluginInstalled, emitPlugi
 import { deployToExecutionDir } from "./deploy.js";
 import { shouldPull, triggerEnabled, type Trigger } from "./policy.js";
 import { readUpdaterConfig } from "./schema.js";
-import { experimentalBranchName } from "./channel.js";
+import { experimentalBranchName, resolveBranch } from "./channel.js";
 import type { Plugin } from "./types.js";
 import { getReposDir, getPluginDir } from "./env.js";
 
@@ -57,10 +57,14 @@ export async function checkUpdates(configDir: string, plugins?: Plugin[]): Promi
     }, false, checkedAt);
   }
 
-  const [remoteHashes, detected] = await Promise.all([
-    precomputeRemoteHashes(list),
-    detectExperimentalBranches(list, experimentalBranchName(readUpdaterConfig(configDir))),
-  ]);
+  const cfg = readUpdaterConfig(configDir);
+  const branchName = experimentalBranchName(cfg);
+  const detectedNow = await detectExperimentalBranches(list, branchName);
+  const resolved = list.map((p) => ({
+    ...p,
+    branch: resolveBranch(p, cfg, detectedNow.get(p.name) ?? previousCache.plugins[p.name]?.experimentalAvailable ?? null),
+  }));
+  const remoteHashes = await precomputeRemoteHashes(resolved);
   for (const plugin of list) {
     const localHead = getLocalHead(plugin.name);
     const remoteHead = remoteHashes.get(plugin.name) ?? null;
@@ -68,7 +72,7 @@ export async function checkUpdates(configDir: string, plugins?: Plugin[]): Promi
     if (updateAvailable) available.push(plugin.name);
     recordCacheEntry(cache, previousCache, plugin.name, {
       kind: "git", installedVersion: null, localHead, remoteHead, latestVersion: null, updateAvailable,
-      experimentalAvailable: detected.get(plugin.name) ?? previousCache.plugins[plugin.name]?.experimentalAvailable ?? null,
+      experimentalAvailable: detectedNow.get(plugin.name) ?? previousCache.plugins[plugin.name]?.experimentalAvailable ?? null,
     }, false, checkedAt);
   }
 
@@ -163,8 +167,10 @@ async function pullCandidates(configDir: string, check: CheckResult, opts: PullO
     const previousVersion = alreadyCloned ? getLocalHead(plugin.name) : null;
     emitPluginProgress(plugin.name, alreadyCloned ? "updating" : "installing");
     try {
+      const detected = previousCache.plugins[plugin.name]?.experimentalAvailable ?? null;
+      const tracked = resolveBranch(plugin, cfg, detected);
       const result = updatePlugin(
-        plugin.name, plugin.url, plugin.branch, plugin.commitHash ?? null,
+        plugin.name, plugin.url, tracked, plugin.commitHash ?? null,
         byHuman ? 0 : (plugin.updateInterval ?? defaultIntervalHours),
         entry?.remoteHead ?? undefined,
       );
