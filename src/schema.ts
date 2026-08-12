@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { defineConfig, defineCapabilities, getConfigDefaults, getCapabilities } from "@intisy-ai/core";
-import type { ActionSpec, FieldSpec, MenuSpec } from "@intisy-ai/core";
+import type { ActionSpec, FieldSpec } from "@intisy-ai/core";
 
 export const UPDATER_NAME = "plugin-updater";
 
@@ -69,7 +69,6 @@ export interface UpdaterSchema {
   current: Record<string, unknown>;
   fields?: FieldSpec[];
   actions?: ActionSpec[];
-  menu?: MenuSpec;
 }
 
 // The same shape `node <bundle> config schema` prints, for a caller that holds this
