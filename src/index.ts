@@ -1,4 +1,4 @@
-import { getAppConfigDir, getAppName, getReposDir, isOpencodeHookInvocation, setEarlyLaunchConfigDir, getPluginDir } from "./env.js";
+import { getAppConfigDir, getAppName, getReposDir, isOpencodeHookInvocation, setEarlyLaunchConfigDir, getPluginDir, isLibraryMode, isHostActivation, setHostActivation } from "./env.js";
 import { writeLog } from "./log.js";
 import { getPlugins, getPluginsPath, readOpencodeJson, setPluginCommitHash } from "./config.js";
 import { selfUpdate, updateNpmPlugin, resolveNpmPluginVersion } from "./npm.js";
@@ -445,11 +445,11 @@ export default plugin;
 
 // consumers like the loader TUI import this module for its API only — running
 // the full updater sequence on import would print over their screen.
-// The ACTIVATION guard makes self-activation idempotent PER PROCESS: opencode may
+// The guard makes self-activation idempotent PER PROCESS: opencode may
 // load plugin-updater as more than one module instance (its npm-plugin copy plus a
 // loader's separately-resolved copy), and each would otherwise run earlyLaunch. The
 // first sets the flag; later instances (and the loaders' runEarlyLaunchHooks) skip.
-if (process.env.PLUGIN_UPDATER_LIBRARY_MODE !== "1" && process.env.PLUGIN_UPDATER_ACTIVATION !== "1") {
-  process.env.PLUGIN_UPDATER_ACTIVATION = "1";
+if (!isLibraryMode() && !isHostActivation()) {
+  setHostActivation(true);
   activate();
 }

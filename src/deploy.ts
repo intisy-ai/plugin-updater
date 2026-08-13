@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
 import { execSync } from "child_process";
-import { getAppName, getReposDir } from "./env.js";
+import { getAppName, getReposDir, setHostActivation } from "./env.js";
 import { writeLog } from "./log.js";
 import { buildInTempDir } from "./git.js";
 import { startDeclaredDaemon } from "./daemon.js";
@@ -300,13 +300,13 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
       const deployed = await import(freshUrl);
       if (typeof deployed.activate === "function") {
         writeLog(`Activating ${pluginName}`);
-        // tells the plugin the updater is the caller, so it must not start
+        // tells the plugin an activation is being driven, so it must not start
         // another earlyLaunch and recurse back into the updater
-        process.env.PLUGIN_UPDATER_ACTIVATION = "1";
+        setHostActivation(true);
         try {
           await deployed.activate();
         } finally {
-          delete process.env.PLUGIN_UPDATER_ACTIVATION;
+          setHostActivation(false);
         }
         writeLog(`Activated ${pluginName}`);
       }

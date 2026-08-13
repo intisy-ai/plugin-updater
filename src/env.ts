@@ -78,3 +78,36 @@ export function getCacheDir(configDir?: string): string {
 export function isOpencodeHookInvocation(firstArgument: unknown): boolean {
   return typeof firstArgument !== "string";
 }
+
+// How a host tells a plugin what it is doing. The generic keys are the contract any plugin and any
+// host may use; the vendor-named ones are read so a host deployed before them still suppresses
+// this plugin, and written so such a host still recognises an activation it did not start.
+const LIBRARY_MODE_KEYS = ["INTISY_PLUGIN_LIBRARY_MODE", "PLUGIN_UPDATER_LIBRARY_MODE"];
+const ACTIVATION_KEYS = ["INTISY_PLUGIN_ACTIVATION", "PLUGIN_UPDATER_ACTIVATION"];
+
+function anySet(keys: string[]): boolean {
+  return keys.some((key) => process.env[key] === "1");
+}
+
+/** A host imported this module for its API and must not have an update sequence run at it. */
+export function isLibraryMode(): boolean {
+  return anySet(LIBRARY_MODE_KEYS);
+}
+
+/** Something is already driving an activation, so starting another would recurse. */
+export function isHostActivation(): boolean {
+  return anySet(ACTIVATION_KEYS);
+}
+
+/** States, or withdraws, that an activation is being driven from here. */
+export function setHostActivation(on: boolean): void {
+  for (const key of ACTIVATION_KEYS) {
+    if (on) process.env[key] = "1";
+    else delete process.env[key];
+  }
+}
+
+/** Says this process imports plugin modules as libraries. */
+export function setLibraryMode(): void {
+  for (const key of LIBRARY_MODE_KEYS) process.env[key] = "1";
+}

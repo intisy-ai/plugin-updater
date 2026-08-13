@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Before any dynamic import of the plugin entry, so importing it cannot start an update sequence.
+process.env.INTISY_PLUGIN_LIBRARY_MODE = "1";
 process.env.PLUGIN_UPDATER_LIBRARY_MODE = "1";
 process.env.PLUGIN_UPDATER_CLI = "1";
 
