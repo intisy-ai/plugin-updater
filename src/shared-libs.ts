@@ -78,6 +78,21 @@ export function declaredLibraryTree(sourceDir: string): SharedLibrary[] {
   return librariesAt(sourceDir, submoduleTree(sourceDir));
 }
 
+// What a home's store must hold for this clone to resolve its imports: the whole tree, not only
+// the top level. core-loader's compiled output imports @intisy-ai/api by name, and api sits under
+// core-loader rather than beside it, so a top-level-only store leaves that import unresolvable.
+// One library reachable by two paths is materialised once, from the shallowest, since both paths
+// are the same checkout of the same commit.
+export function materializableLibraries(sourceDir: string): SharedLibrary[] {
+  const shallowest = new Map<string, { library: SharedLibrary; depth: number }>();
+  for (const library of declaredLibraryTree(sourceDir)) {
+    const depth = path.relative(sourceDir, library.dir).split(path.sep).length;
+    const seen = shallowest.get(library.specifier);
+    if (!seen || depth < seen.depth) shallowest.set(library.specifier, { library, depth });
+  }
+  return [...shallowest.values()].map((entry) => entry.library);
+}
+
 // A declared library with no build output cannot be put in a home's store, so any plugin
 // importing it by name fails to load. Callers use this to refuse the deploy fast path: only a
 // build produces the dist, and skipping the build is what leaves the home unable to repair itself.
@@ -120,7 +135,7 @@ export function materializeLibraries(
 ): MaterializeResult[] {
   const results: MaterializeResult[] = [];
 
-  for (const library of declaredLibraries(sourceDir)) {
+  for (const library of materializableLibraries(sourceDir)) {
     const dist = path.join(library.dir, "dist");
     if (!fs.existsSync(dist)) {
       results.push({ specifier: library.specifier, status: "skipped", detail: "not built" });

@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { afterEach, describe, expect, it } from "vitest";
-import { declaredLibraries, materializeLibraries, sharedStoreDir, submoduleTree, unbuiltLibraries } from "../shared-libs.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { declaredLibraries, materializeLibraries, materializableLibraries, sharedStoreDir, submoduleTree, unbuiltLibraries } from "../shared-libs.js";
 
 let workDir: string | undefined;
 afterEach(() => {
@@ -175,5 +175,52 @@ describe("unbuiltLibraries", () => {
 
   it("is empty for a clone that declares no libraries", () => {
     expect(unbuiltLibraries(makeClone({}))).toEqual([]);
+  });
+});
+
+describe("materialising a nested library", () => {
+  let home: string;
+  let clone: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "pu-store-"));
+    clone = join(home, "repos", "demo");
+    mkdirSync(clone, { recursive: true });
+  });
+  afterEach(() => { rmSync(home, { recursive: true, force: true }); });
+
+  function library(relative: string, name: string, version: string, submodules: string[] = []): void {
+    const dir = join(clone, relative);
+    mkdirSync(join(dir, "dist"), { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name, version, main: "dist/index.js" }));
+    writeFileSync(join(dir, "dist", "index.js"), "export const x = 1;\n");
+    if (submodules.length) {
+      writeFileSync(join(dir, ".gitmodules"), submodules.map((path) => `[submodule "${path}"]\n\tpath = ${path}\n`).join(""));
+    }
+  }
+
+  it("puts a library nested under another submodule into the store", () => {
+    writeFileSync(join(clone, ".gitmodules"), '[submodule "core"]\n\tpath = core\n');
+    library("core", "core", "0.3.3", ["api"]);
+    library(join("core", "api"), "api", "0.2.0");
+
+    const results = materializeLibraries(clone, home);
+
+    expect(results.map((result) => result.specifier).sort()).toEqual(["@intisy-ai/api", "@intisy-ai/core"]);
+    expect(existsSync(join(home, "node_modules", "@intisy-ai", "api", "dist", "index.js"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(home, "node_modules", "@intisy-ai", "api", "package.json"), "utf8"))).toMatchObject({
+      name: "@intisy-ai/api", version: "0.2.0", type: "module", main: "dist/index.js",
+    });
+  });
+
+  it("materialises one library once when two submodules carry it", () => {
+    writeFileSync(join(clone, ".gitmodules"), '[submodule "core"]\n\tpath = core\n[submodule "core-loader"]\n\tpath = core-loader\n');
+    library("core", "core", "0.3.3", ["api"]);
+    library(join("core", "api"), "api", "0.2.0");
+    library("core-loader", "core-loader", "1.3.2", ["api"]);
+    library(join("core-loader", "api"), "api", "0.2.0");
+
+    const results = materializeLibraries(clone, home);
+
+    expect(results.filter((result) => result.specifier === "@intisy-ai/api")).toHaveLength(1);
   });
 });
