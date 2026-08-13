@@ -230,3 +230,41 @@ describe("missingDeclaredArtifacts", () => {
     expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual([]);
   });
 });
+
+// The pass that copies NOTHING is the one that matters: every existing home is already current, so
+// a sidecar written only on a real deploy would never appear there at all.
+describe("deployToExecutionDir on a home with nothing to deploy", () => {
+  let home: string;
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "pu-warm-"));
+    for (const key of ["HUB_CONFIG_DIR", "PLUGIN_UPDATER_APP"]) saved[key] = process.env[key];
+    process.env.HUB_CONFIG_DIR = home;
+    process.env.PLUGIN_UPDATER_APP = "opencode";
+  });
+  afterEach(() => {
+    for (const key of ["HUB_CONFIG_DIR", "PLUGIN_UPDATER_APP"]) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key] as string;
+    }
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("writes the sidecar without building or copying anything", async () => {
+    const { deployToExecutionDir } = await import("../deploy.js");
+    const cloneDir = join(home, "repos", "warm");
+    mkdirSync(join(cloneDir, "dist"), { recursive: true });
+    writeFileSync(join(cloneDir, "package.json"), JSON.stringify({ name: "warm", main: "dist/index.js" }));
+    writeFileSync(join(cloneDir, "dist", "index.js"), "export const activate = () => ({});\n");
+    writeFileSync(join(cloneDir, "plugin.json"), JSON.stringify({ id: "warm", api: 1, entry: "dist/index.js" }));
+
+    const pluginDir = join(home, "plugin");
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, "warm.js"), "export const activate = () => ({});\n");
+
+    await deployToExecutionDir("warm", pluginDir, false, home);
+
+    expect(JSON.parse(readFileSync(join(pluginDir, "warm.json"), "utf8")).id).toBe("warm");
+  });
+});

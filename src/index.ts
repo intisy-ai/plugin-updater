@@ -9,6 +9,7 @@ import { checkUpdates, runAutoUpdate, updateOne as updateOneInHome, updateAll as
 import { resolveMode, type Trigger } from "./policy.js";
 import { resolveBranch, tracksExperimental } from "./channel.js";
 import { readUpdateCache } from "./cache.js";
+import { deployedIdFor, DEPLOYED_SUFFIXES } from "./manifest.js";
 // Importing this registers the config defaults and the capability schema, which must
 // happen before the CLI guard below so `config schema` answers.
 import { updaterSchema, readUpdaterConfig } from "./schema.js";
@@ -140,7 +141,7 @@ if (await maybeRunCli()) {
 
 // remove repos/ clones and deployed plugin/ files for plugins no longer in
 // plugins.json, so a removed/renamed plugin stops showing up
-function pruneOrphans(configDir: string, plugins: Plugin[]): void {
+export function pruneOrphans(configDir: string, plugins: Plugin[]): void {
   const keep = new Set(plugins.map((p) => p.name));
   try {
     for (const dir of fs.readdirSync(getReposDir(configDir))) {
@@ -152,12 +153,15 @@ function pruneOrphans(configDir: string, plugins: Plugin[]): void {
       }
     }
   } catch { /* no repos dir */ }
+  const deployedIds = new Set(plugins.map((plugin) => deployedIdFor(getReposDir(configDir), plugin.name)));
   try {
     for (const file of fs.readdirSync(getPluginDir(configDir))) {
-      if (!file.endsWith(".js")) continue;
-      if (!keep.has(file.slice(0, -3))) {
-        try { fs.unlinkSync(path.join(getPluginDir(configDir), file)); writeLog(`Pruned orphaned plugin/${file}`); } catch { /* ignore */ }
-      }
+      // The deploy directory's own ESM marker, owned by no plugin.
+      if (file === "package.json") continue;
+      const suffix = DEPLOYED_SUFFIXES.find((candidate) => file.endsWith(candidate));
+      if (!suffix) continue;
+      if (deployedIds.has(file.slice(0, -suffix.length))) continue;
+      try { fs.unlinkSync(path.join(getPluginDir(configDir), file)); writeLog(`Pruned orphaned plugin/${file}`); } catch { /* ignore */ }
     }
   } catch { /* no plugin dir */ }
 }

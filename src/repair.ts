@@ -4,6 +4,7 @@ import { getReposDir, getPluginDir } from "./env.js";
 import { writeLog } from "./log.js";
 import { getLocalHead } from "./git.js";
 import { deployToExecutionDir, missingDeclaredArtifacts } from "./deploy.js";
+import { deployedIdFor } from "./manifest.js";
 
 // A clone can be at the right commit and still be unusable: a build that half-landed leaves
 // the main entry in place while another file the package.json declares is absent, and the
@@ -31,7 +32,7 @@ export function missingPluginArtifacts(configDir: string, name: string): string[
 export function checkPluginHealth(configDir: string, name: string): PluginHealth {
   const sourceDir = path.join(getReposDir(configDir), name);
   const cloned = fs.existsSync(sourceDir);
-  const deployed = fs.existsSync(path.join(getPluginDir(configDir), `${name}.js`));
+  const deployed = fs.existsSync(path.join(getPluginDir(configDir), `${deployedIdFor(getReposDir(configDir), name)}.js`));
   const missing = cloned ? missingDeclaredArtifacts(sourceDir, path.join(sourceDir, "package.json")) : [];
   return { name, cloned, deployed, missing, healthy: cloned && missing.length === 0, head: cloned ? getLocalHead(name) : null };
 }

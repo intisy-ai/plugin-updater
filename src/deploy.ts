@@ -7,6 +7,8 @@ import { writeLog } from "./log.js";
 import { buildInTempDir } from "./git.js";
 import { startDeclaredDaemon } from "./daemon.js";
 import { materializeLibraries, unbuiltLibraries } from "./shared-libs.js";
+import type { PluginManifest } from "@intisy-ai/api";
+import { readCloneManifest, syncManifestSidecar } from "./manifest.js";
 
 // The clone's current commit, used to tie a deployed artifact to the source it was
 // built from (self-heals a stale deploy left by an earlier interrupted pass).
@@ -33,8 +35,10 @@ export function isLoaderPlugin(sourceDir: string, pluginName: string): boolean {
 // A plugin is deployed as ONE file next to its siblings-free execution dir, so a repo whose
 // npm entry is a multi-file tsc dist declares a self-contained bundle as `pluginEntry`.
 // Without that the deployed file imports modules that were never copied, and anything that
-// loads it (an app hook, the `config schema` probe behind every settings screen) fails.
-export function deployEntryFile(pkg: { main?: string; pluginEntry?: string }): string {
+// loads it (an app hook, the `config schema` probe behind every settings screen) fails. The
+// manifest's `entry` is asked first, since the manifest is what states which module a host imports.
+export function deployEntryFile(pkg: { main?: string; pluginEntry?: string }, manifest?: PluginManifest | null): string {
+  if (manifest?.entry) return manifest.entry;
   if (typeof pkg.pluginEntry === "string" && pkg.pluginEntry) return pkg.pluginEntry;
   if (typeof pkg.main === "string" && pkg.main) return pkg.main;
   return "index.js";
@@ -140,8 +144,10 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   if (!fs.existsSync(sourceDir)) return false;
 
   const packageJsonPath = path.join(sourceDir, "package.json");
+  const manifest = readCloneManifest(sourceDir);
+  const deployedId = manifest?.id ?? pluginName;
   let entryFile = "index.js";
-  const pluginExecutionFile = path.join(executionPath, `${pluginName}.js`);
+  const pluginExecutionFile = path.join(executionPath, `${deployedId}.js`);
   const deployedExists = fs.existsSync(pluginExecutionFile);
   // Self-heal partial/failed prior deploys. `changed` only tracks whether the git
   // REMOTE moved this pass — but a clone can already sit at the target commit while the
@@ -149,7 +155,7 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // never landed). Without this, the fast-path below skips redeploy FOREVER and
   // activate() keeps regenerating from stale code. Stamp the deployed commit on every
   // successful copy and force a redeploy whenever it no longer matches the clone's HEAD.
-  const deployedShaFile = path.join(executionPath, `${pluginName}.sha`);
+  const deployedShaFile = path.join(executionPath, `${deployedId}.sha`);
   const head = repoHead(sourceDir);
   let deployedSha = "";
   try { deployedSha = fs.readFileSync(deployedShaFile, "utf8").trim(); } catch { /* never deployed / pre-sha install */ }
@@ -201,7 +207,7 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
 
   if (fs.existsSync(packageJsonPath)) {
     try {
-      entryFile = deployEntryFile(JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as { main?: string; pluginEntry?: string });
+      entryFile = deployEntryFile(JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as { main?: string; pluginEntry?: string }, manifest);
     } catch { /* ignore */ }
   }
 
@@ -231,6 +237,12 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // gating this would leave every plugin there unable to resolve its imports
   // forever. Re-running is cheap, since an up-to-date library is left alone.
   materializeLibraries(sourceDir, configDir, writeLog);
+
+  // Outside the "did anything change" guard for the same reason the store above is: a home whose
+  // plugins are already current never enters that branch, and a host with no sidecar cannot see
+  // the plugin at all.
+  const sidecar = syncManifestSidecar(sourceDir, executionPath, deployedId, writeLog);
+  if (sidecar !== "none") writeLog(`Manifest for ${deployedId} ${sidecar}`);
 
   if (!nothingToDeploy) {
     if (!fs.existsSync(deploySource)) {
