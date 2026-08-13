@@ -9,8 +9,13 @@ import type { AppPaths } from "@intisy-ai/core";
 // set by earlyLaunch/direct-update so all path resolution targets that dir
 let earlyLaunchConfigDir: string | null = null;
 
-export function setEarlyLaunchConfigDir(dir: string): void {
+export function setEarlyLaunchConfigDir(dir: string | null): void {
   earlyLaunchConfigDir = dir;
+}
+
+/** The home a run has stated, or null while none has. */
+export function getEarlyLaunchConfigDir(): string | null {
+  return earlyLaunchConfigDir;
 }
 
 // the CLI runs without "claude" in argv, so it forces the app via env

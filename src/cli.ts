@@ -5,8 +5,9 @@ process.env.PLUGIN_UPDATER_CLI = "1";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { resolveInitApps, cwdApp, ensurePluginsJson, registerUpdaterWithApp, type PresentApps } from "./init.js";
+import { resolveInitApps, cwdApp, registerUpdaterWithApp, type PresentApps } from "./init.js";
 import { getAppConfigDir, getReposDir, getPluginDir } from "./env.js";
+import { registerPluginEntry, removePluginEntry } from "./manage.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { getApps } from "@intisy-ai/core";
 
@@ -114,41 +115,6 @@ async function promptInitApps(_present: PresentApps, defaultApp: string | null):
   }
 }
 
-function addPluginEntry(configDir: string, url: string, branch?: string, sync?: boolean): { name: string; url: string; branch?: string } {
-  const cleanUrl = url.replace(/\.git$/, "");
-  const name = cleanUrl.split("/").pop() ?? cleanUrl;
-  ensurePluginsJson(configDir);
-  const file = pluginsJsonPath(configDir);
-  const entries = (readJson(file) as unknown as Array<Record<string, unknown>>) ?? [];
-  if (!entries.some((e) => e.name === name)) {
-    const entry: Record<string, unknown> = { name, url: cleanUrl, enabled: true, autoUpdate: true };
-    if (branch) entry.branch = branch;
-    if (sync) entry.sync = true;
-    entries.push(entry);
-    fs.writeFileSync(file, JSON.stringify(entries, null, 2), "utf8");
-    console.log(`Added ${name} to ${file}`);
-  } else if (sync) {
-    // already present: honor --sync by enabling sync on the existing entry
-    const existing = entries.find((e) => e.name === name);
-    if (existing && existing.sync !== true) {
-      existing.sync = true;
-      fs.writeFileSync(file, JSON.stringify(entries, null, 2), "utf8");
-      console.log(`Enabled sync on ${name} in ${file}`);
-    } else {
-      console.log(`${name} already present (sync on) in ${file}`);
-    }
-  } else {
-    console.log(`${name} already present in ${file}`);
-  }
-  return { name, url: cleanUrl, branch };
-}
-
-function removePluginEntry(configDir: string, name: string): void {
-  const file = pluginsJsonPath(configDir);
-  const entries = (readJson(file) as unknown as Array<Record<string, unknown>>) ?? [];
-  fs.writeFileSync(file, JSON.stringify(entries.filter((e) => e.name !== name), null, 2), "utf8");
-}
-
 async function setupEntry(
   updater: { updatePluginPublic: (name: string, url: string, branch?: string) => Promise<unknown> },
   configDir: string,
@@ -156,7 +122,11 @@ async function setupEntry(
   branch?: string,
   sync?: boolean
 ): Promise<void> {
-  const entry = addPluginEntry(configDir, url, branch, sync);
+  const entry = registerPluginEntry(configDir, url, { branch, sync });
+  const file = path.join(configDir, "config", "plugins.json");
+  if (entry.added) console.log(`Added ${entry.name} to ${file}`);
+  else if (sync && entry.syncEnabled) console.log(`Enabled sync on ${entry.name} in ${file}`);
+  else console.log(`${entry.name} already present in ${file}`);
   console.log(`Setting up ${entry.name}...`);
   try {
     await updater.updatePluginPublic(entry.name, entry.url, entry.branch);

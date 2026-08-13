@@ -20,6 +20,8 @@ import type { AppDescriptor } from "@intisy-ai/core";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
+import type { Plugin as ApiPlugin, PluginContext } from "@intisy-ai/api";
+import { pluginManagement } from "./manage.js";
 import {
   emitPluginInstalled,
   emitPluginUpdated,
@@ -425,6 +427,17 @@ export async function activate(opencodeHookInput?: unknown): Promise<void | obje
   writeLog(`Found ${gitPlugins.length} git plugins in plugins.json`);
   await earlyLaunch(configDir, gitPlugins);
 }
+
+// What an in-process host loads. The named exports above stay: an app that imports this bundle
+// directly, and the loader that imports it for its API, both predate the host and still work.
+const plugin: ApiPlugin = {
+  activate(context: PluginContext) {
+    context.provide("plugin-management", pluginManagement(context.paths.home, { updatePluginPublic, uninstallPlugin }));
+  },
+  deactivate() {},
+};
+
+export default plugin;
 
 // consumers like the loader TUI import this module for its API only — running
 // the full updater sequence on import would print over their screen.
