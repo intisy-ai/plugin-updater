@@ -144,7 +144,7 @@ export function materializeLibraries(
 
     let version = "0.0.0";
     let main = "dist/index.js";
-    let type: string | undefined;
+    let type: string | undefined; // mirrors the source library's own declaration; core-loader has none (CommonJS)
     try {
       const pkg = JSON.parse(fs.readFileSync(path.join(library.dir, "package.json"), "utf8")) as {
         version?: string;
@@ -166,10 +166,7 @@ export function materializeLibraries(
     try {
       fs.rmSync(target, { recursive: true, force: true });
       copyDirectory(dist, path.join(target, "dist"));
-      // A package.json is what makes the directory resolvable by name at all. The module
-      // system is mirrored from the library's OWN package.json rather than assumed: a
-      // library like core-loader declares no "type" (it is CommonJS), and marking it
-      // "module" makes every file in it unimportable.
+      // A package.json is what makes the directory resolvable by name at all.
       const storePackageJson: Record<string, unknown> = { name: library.specifier, version, main };
       if (type !== undefined) storePackageJson.type = type;
       fs.writeFileSync(path.join(target, "package.json"), JSON.stringify(storePackageJson, null, 2), "utf8");
@@ -204,6 +201,11 @@ export function pruneAbandonedPluginStore(
   const realStorePopulated = fs.existsSync(realStore) && fs.readdirSync(realStore).length > 0;
   if (!realStorePopulated) return;
 
-  fs.rmSync(abandoned, { recursive: true, force: true });
-  writeLog(`Removed abandoned library store at ${abandoned}`);
+  // A locked file (Windows) must never fail the caller's deploy; retried on the next pass.
+  try {
+    fs.rmSync(abandoned, { recursive: true, force: true });
+    writeLog(`Removed abandoned library store at ${abandoned}`);
+  } catch (e: unknown) {
+    writeLog(`Could not remove abandoned library store at ${abandoned}: ${(e as { message: string }).message}`, true);
+  }
 }
