@@ -18,6 +18,8 @@ export interface RegisteredEntry {
   branch?: string;
   added: boolean;
   syncEnabled: boolean;
+  /** Whether this call wrote the list. False means the entry was already exactly as asked for. */
+  changed: boolean;
 }
 
 function readEntries(file: string): Array<Record<string, unknown>> {
@@ -54,15 +56,15 @@ export function registerPluginEntry(configDir: string, url: string, opts: Regist
     if (opts.sync) entry.sync = true;
     entries.push(entry);
     writeEntries(file, entries);
-    return { name, url: cleanUrl, branch: opts.branch, added: true, syncEnabled: opts.sync === true };
+    return { name, url: cleanUrl, branch: opts.branch, added: true, syncEnabled: opts.sync === true, changed: true };
   }
 
   if (opts.sync && existing.sync !== true) {
     existing.sync = true;
     writeEntries(file, entries);
-    return { name, url: cleanUrl, branch: opts.branch, added: false, syncEnabled: true };
+    return { name, url: cleanUrl, branch: opts.branch, added: false, syncEnabled: true, changed: true };
   }
-  return { name, url: cleanUrl, branch: opts.branch, added: false, syncEnabled: existing.sync === true };
+  return { name, url: cleanUrl, branch: opts.branch, added: false, syncEnabled: existing.sync === true, changed: false };
 }
 
 export function removePluginEntry(configDir: string, name: string): void {

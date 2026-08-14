@@ -127,7 +127,8 @@ async function setupEntry(
   const entry = registerPluginEntry(configDir, url, { branch, sync });
   const file = path.join(configDir, "config", "plugins.json");
   if (entry.added) console.log(`Added ${entry.name} to ${file}`);
-  else if (sync && entry.syncEnabled) console.log(`Enabled sync on ${entry.name} in ${file}`);
+  else if (entry.changed) console.log(`Enabled sync on ${entry.name} in ${file}`);
+  else if (entry.syncEnabled) console.log(`${entry.name} already present (sync on) in ${file}`);
   else console.log(`${entry.name} already present in ${file}`);
   console.log(`Setting up ${entry.name}...`);
   try {

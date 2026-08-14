@@ -15,7 +15,7 @@ describe("registerPluginEntry", () => {
 
   it("derives the entry name from the repository url", () => {
     const added = registerPluginEntry(home, "https://github.com/intisy-ai/demo-plugin.git");
-    expect(added).toMatchObject({ name: "demo-plugin", url: "https://github.com/intisy-ai/demo-plugin", added: true });
+    expect(added).toMatchObject({ name: "demo-plugin", url: "https://github.com/intisy-ai/demo-plugin", added: true, changed: true });
     expect(entries()).toEqual([
       { name: "demo-plugin", url: "https://github.com/intisy-ai/demo-plugin", enabled: true, autoUpdate: true },
     ]);
@@ -25,14 +25,21 @@ describe("registerPluginEntry", () => {
     registerPluginEntry(home, "https://github.com/intisy-ai/demo-plugin");
     const again = registerPluginEntry(home, "https://github.com/intisy-ai/demo-plugin");
     expect(again.added).toBe(false);
+    expect(again.changed).toBe(false);
     expect(entries()).toHaveLength(1);
   });
 
   it("turns sync on for an entry that is already listed without it", () => {
     registerPluginEntry(home, "https://github.com/intisy-ai/demo-plugin");
     const again = registerPluginEntry(home, "https://github.com/intisy-ai/demo-plugin", { sync: true });
-    expect(again).toMatchObject({ added: false, syncEnabled: true });
+    expect(again).toMatchObject({ added: false, syncEnabled: true, changed: true });
     expect(entries()[0].sync).toBe(true);
+  });
+
+  it("reports no change for an entry whose sync is already on, so a caller cannot claim it acted", () => {
+    registerPluginEntry(home, "https://github.com/intisy-ai/demo-plugin", { sync: true });
+    const again = registerPluginEntry(home, "https://github.com/intisy-ai/demo-plugin", { sync: true });
+    expect(again).toMatchObject({ added: false, syncEnabled: true, changed: false });
   });
 
   it("carries a branch onto a new entry", () => {
