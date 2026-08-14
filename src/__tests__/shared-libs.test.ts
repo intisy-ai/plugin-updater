@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { declaredLibraries, materializeLibraries, materializableLibraries, sharedStoreDir, submoduleTree, unbuiltLibraries } from "../shared-libs.js";
+import { declaredLibraries, materializeLibraries, materializableLibraries, pruneAbandonedPluginStore, sharedStoreDir, submoduleTree, unbuiltLibraries } from "../shared-libs.js";
 
 let workDir: string | undefined;
 afterEach(() => {
@@ -11,7 +11,7 @@ afterEach(() => {
   workDir = undefined;
 });
 
-function makeClone(submodules: Record<string, { name?: string; version?: string; dist?: Record<string, string> }>): string {
+function makeClone(submodules: Record<string, { name?: string; version?: string; type?: string; dist?: Record<string, string> }>): string {
   workDir = mkdtempSync(join(tmpdir(), "plugin-updater-shared-"));
   const sourceDir = join(workDir, "repos", "example");
   mkdirSync(sourceDir, { recursive: true });
@@ -28,7 +28,9 @@ function makeClone(submodules: Record<string, { name?: string; version?: string;
     const dir = join(sourceDir, relative);
     mkdirSync(dir, { recursive: true });
     if (spec.name !== undefined) {
-      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: spec.name, version: spec.version ?? "1.0.0", main: "dist/index.js" }));
+      const pkg: Record<string, unknown> = { name: spec.name, version: spec.version ?? "1.0.0", main: "dist/index.js" };
+      if (spec.type !== undefined) pkg.type = spec.type;
+      writeFileSync(join(dir, "package.json"), JSON.stringify(pkg));
     }
     if (spec.dist) {
       mkdirSync(join(dir, "dist"), { recursive: true });
@@ -95,9 +97,32 @@ describe("materializeLibraries", () => {
     expect(JSON.parse(readFileSync(join(target, "package.json"), "utf8"))).toEqual({
       name: "@intisy-ai/core",
       version: "0.3.0",
-      type: "module",
       main: "dist/index.js",
     });
+  });
+
+  // core-loader ships CommonJS and declares no "type" at all. Hardcoding "type": "module"
+  // in the store made every one of its files unimportable ("exports is not defined in ES
+  // module scope"), so the store must mirror what the library itself declares.
+  it("mirrors type: module into the store when the source library declares it", () => {
+    const sourceDir = makeClone({ core: { name: "core", type: "module", dist: { "index.js": "export const x = 1;\n" } } });
+    const configDir = join(workDir as string, "home");
+
+    materializeLibraries(sourceDir, configDir);
+
+    const target = join(sharedStoreDir(configDir), "@intisy-ai", "core");
+    expect(JSON.parse(readFileSync(join(target, "package.json"), "utf8"))).toMatchObject({ type: "module" });
+  });
+
+  it("writes no type key when the source library declares none (CommonJS)", () => {
+    const sourceDir = makeClone({ "core-loader": { name: "core-loader", dist: { "index.js": "exports.x = 1;\n" } } });
+    const configDir = join(workDir as string, "home");
+
+    materializeLibraries(sourceDir, configDir);
+
+    const target = join(sharedStoreDir(configDir), "@intisy-ai", "core-loader");
+    const pkg = JSON.parse(readFileSync(join(target, "package.json"), "utf8")) as Record<string, unknown>;
+    expect(pkg).not.toHaveProperty("type");
   });
 
   // Node resolves a bare specifier by walking UP from the importing file. The deployed
@@ -208,7 +233,7 @@ describe("materialising a nested library", () => {
     expect(results.map((result) => result.specifier).sort()).toEqual(["@intisy-ai/api", "@intisy-ai/core"]);
     expect(existsSync(join(home, "node_modules", "@intisy-ai", "api", "dist", "index.js"))).toBe(true);
     expect(JSON.parse(readFileSync(join(home, "node_modules", "@intisy-ai", "api", "package.json"), "utf8"))).toMatchObject({
-      name: "@intisy-ai/api", version: "0.2.0", type: "module", main: "dist/index.js",
+      name: "@intisy-ai/api", version: "0.2.0", main: "dist/index.js",
     });
   });
 
@@ -222,5 +247,88 @@ describe("materialising a nested library", () => {
     const results = materializeLibraries(clone, home);
 
     expect(results.filter((result) => result.specifier === "@intisy-ai/api")).toHaveLength(1);
+  });
+});
+
+// <home>/plugin/node_modules is a store this plugin wrote before the store moved to
+// <home>/node_modules. Node resolves the CLOSER directory first from a bundle at
+// <home>/plugin/<id>.js, so a stale copy left there silently shadows the real store forever.
+describe("pruneAbandonedPluginStore", () => {
+  let home: string;
+  let pluginDir: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "pu-prune-"));
+    pluginDir = join(home, "plugin");
+    mkdirSync(pluginDir, { recursive: true });
+  });
+  afterEach(() => { rmSync(home, { recursive: true, force: true }); });
+
+  function seedAbandonedStore(): string {
+    const abandoned = join(pluginDir, "node_modules", "@intisy-ai", "core");
+    mkdirSync(abandoned, { recursive: true });
+    writeFileSync(join(abandoned, "package.json"), JSON.stringify({ name: "@intisy-ai/core", version: "0.3.1" }));
+    return join(pluginDir, "node_modules");
+  }
+
+  function seedRealStore(): string {
+    const real = join(home, "node_modules", "@intisy-ai", "core");
+    mkdirSync(real, { recursive: true });
+    writeFileSync(join(real, "package.json"), JSON.stringify({ name: "@intisy-ai/core", version: "0.3.3" }));
+    return join(home, "node_modules");
+  }
+
+  it("removes the abandoned plugin-directory store once the real store is populated", () => {
+    const abandoned = seedAbandonedStore();
+    seedRealStore();
+
+    pruneAbandonedPluginStore(pluginDir, home);
+
+    expect(existsSync(abandoned)).toBe(false);
+  });
+
+  it("logs the removal through the provided writeLog", () => {
+    const abandoned = seedAbandonedStore();
+    seedRealStore();
+    const logged: string[] = [];
+
+    pruneAbandonedPluginStore(pluginDir, home, (message) => logged.push(message));
+
+    expect(existsSync(abandoned)).toBe(false);
+    expect(logged.some((message) => message.includes(abandoned))).toBe(true);
+  });
+
+  it("does not remove the abandoned store when the real store is empty", () => {
+    const abandoned = seedAbandonedStore();
+    mkdirSync(join(home, "node_modules"), { recursive: true });
+
+    pruneAbandonedPluginStore(pluginDir, home);
+
+    expect(existsSync(abandoned)).toBe(true);
+  });
+
+  it("does not remove the abandoned store when the real store does not exist", () => {
+    const abandoned = seedAbandonedStore();
+
+    pruneAbandonedPluginStore(pluginDir, home);
+
+    expect(existsSync(abandoned)).toBe(true);
+  });
+
+  it("never touches the real store", () => {
+    seedAbandonedStore();
+    const real = seedRealStore();
+    const realPackageJson = join(real, "@intisy-ai", "core", "package.json");
+    const before = readFileSync(realPackageJson, "utf8");
+
+    pruneAbandonedPluginStore(pluginDir, home);
+
+    expect(existsSync(real)).toBe(true);
+    expect(readFileSync(realPackageJson, "utf8")).toBe(before);
+  });
+
+  it("does nothing when there is no abandoned store to begin with", () => {
+    seedRealStore();
+    expect(() => pruneAbandonedPluginStore(pluginDir, home)).not.toThrow();
+    expect(existsSync(join(pluginDir, "node_modules"))).toBe(false);
   });
 });

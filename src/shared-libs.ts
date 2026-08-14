@@ -144,13 +144,16 @@ export function materializeLibraries(
 
     let version = "0.0.0";
     let main = "dist/index.js";
+    let type: string | undefined;
     try {
       const pkg = JSON.parse(fs.readFileSync(path.join(library.dir, "package.json"), "utf8")) as {
         version?: string;
         main?: string;
+        type?: string;
       };
       if (typeof pkg.version === "string") version = pkg.version;
       if (typeof pkg.main === "string") main = pkg.main;
+      if (typeof pkg.type === "string") type = pkg.type;
     } catch { /* the defaults above are correct for every library in this ecosystem */ }
 
     const target = path.join(sharedStoreDir(configDir), ...library.specifier.split("/"));
@@ -163,13 +166,13 @@ export function materializeLibraries(
     try {
       fs.rmSync(target, { recursive: true, force: true });
       copyDirectory(dist, path.join(target, "dist"));
-      // A package.json is what makes the directory resolvable by name at all, and
-      // type: module is what stops Node re-parsing each ESM bundle on import.
-      fs.writeFileSync(
-        path.join(target, "package.json"),
-        JSON.stringify({ name: library.specifier, version, type: "module", main }, null, 2),
-        "utf8",
-      );
+      // A package.json is what makes the directory resolvable by name at all. The module
+      // system is mirrored from the library's OWN package.json rather than assumed: a
+      // library like core-loader declares no "type" (it is CommonJS), and marking it
+      // "module" makes every file in it unimportable.
+      const storePackageJson: Record<string, unknown> = { name: library.specifier, version, main };
+      if (type !== undefined) storePackageJson.type = type;
+      fs.writeFileSync(path.join(target, "package.json"), JSON.stringify(storePackageJson, null, 2), "utf8");
       results.push({ specifier: library.specifier, status: "written", detail: version });
       writeLog(`Shared ${library.specifier}@${version}`);
     } catch (e: unknown) {
@@ -179,4 +182,28 @@ export function materializeLibraries(
   }
 
   return results;
+}
+
+// <pluginDir>/node_modules is a store this plugin wrote before the shared store moved to
+// sharedStoreDir (the home root). Nothing writes that location any more, but a deployed
+// bundle at <pluginDir>/<id>.js resolves the CLOSER directory first, so a stale copy left
+// there silently shadows the real store forever. Removing it here makes every existing
+// home self-heal on its next deploy pass.
+export function pruneAbandonedPluginStore(
+  pluginDir: string,
+  configDir: string,
+  writeLog: (message: string, isError?: boolean) => void = () => {},
+): void {
+  const abandoned = path.join(pluginDir, "node_modules");
+  const realStore = sharedStoreDir(configDir);
+  if (path.resolve(abandoned) === path.resolve(realStore)) return;
+  if (!fs.existsSync(abandoned)) return;
+
+  // Only prune once the real store actually has something in it: removing the abandoned
+  // copy first would leave a home with no libraries at all if the real store is still empty.
+  const realStorePopulated = fs.existsSync(realStore) && fs.readdirSync(realStore).length > 0;
+  if (!realStorePopulated) return;
+
+  fs.rmSync(abandoned, { recursive: true, force: true });
+  writeLog(`Removed abandoned library store at ${abandoned}`);
 }

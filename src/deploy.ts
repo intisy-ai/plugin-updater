@@ -6,7 +6,7 @@ import { getAppName, getReposDir, setHostActivation } from "./env.js";
 import { writeLog } from "./log.js";
 import { buildInTempDir } from "./git.js";
 import { startDeclaredDaemon } from "./daemon.js";
-import { materializeLibraries, unbuiltLibraries } from "./shared-libs.js";
+import { materializeLibraries, pruneAbandonedPluginStore, unbuiltLibraries } from "./shared-libs.js";
 import type { PluginManifest } from "@intisy-ai/api";
 import { readCloneManifest, syncManifestSidecar } from "./manifest.js";
 
@@ -237,6 +237,9 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // gating this would leave every plugin there unable to resolve its imports
   // forever. Re-running is cheap, since an up-to-date library is left alone.
   materializeLibraries(sourceDir, configDir, writeLog);
+  // Self-heals a home still shadowed by the store's old location (see pruneAbandonedPluginStore).
+  // Runs on every pass, fast path included, since that is the only way an existing home repairs itself.
+  pruneAbandonedPluginStore(executionPath, configDir, writeLog);
 
   // Outside the "did anything change" guard for the same reason the store above is: a home whose
   // plugins are already current never enters that branch, and a host with no sidecar cannot see
