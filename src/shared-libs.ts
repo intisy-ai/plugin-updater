@@ -130,14 +130,33 @@ interface SharedLibraryManifest {
 // hardcoded "type": "module") must be judged stale even when the version string hasn't
 // moved: libraries in this ecosystem change commits far more often than they change versions,
 // so a version-only check can never see a metadata correction like the mirrored "type" field.
-function storeMatches(target: string, expected: SharedLibraryManifest): boolean {
-  if (!fs.existsSync(path.join(target, "dist"))) return false;
+function readStoreManifest(target: string): Partial<SharedLibraryManifest> | undefined {
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(target, "package.json"), "utf8")) as Partial<SharedLibraryManifest>;
-    return pkg.name === expected.name && pkg.version === expected.version && pkg.main === expected.main && pkg.type === expected.type;
+    return JSON.parse(fs.readFileSync(path.join(target, "package.json"), "utf8")) as Partial<SharedLibraryManifest>;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+function storeMatches(target: string, expected: SharedLibraryManifest, pkg: Partial<SharedLibraryManifest> | undefined): boolean {
+  if (!fs.existsSync(path.join(target, "dist"))) return false;
+  return pkg?.name === expected.name && pkg?.version === expected.version && pkg?.main === expected.main && pkg?.type === expected.type;
+}
+
+// Plain x.y.z versions only, compared numerically segment by segment (never as a semver
+// range or with prerelease ordering, neither of which this ecosystem's libraries use). A
+// missing or non-numeric segment reads as 0 rather than throwing, so a malformed store entry
+// never blocks a repair.
+export function isVersionHigherThan(a: string, b: string): boolean {
+  const segmentsA = a.split(".");
+  const segmentsB = b.split(".");
+  const length = Math.max(segmentsA.length, segmentsB.length);
+  for (let i = 0; i < length; i++) {
+    const valueA = Number.parseInt(segmentsA[i] ?? "", 10) || 0;
+    const valueB = Number.parseInt(segmentsB[i] ?? "", 10) || 0;
+    if (valueA !== valueB) return valueA > valueB;
+  }
+  return false;
 }
 
 // Places each library the clone declares into the home's shared store, so anything
@@ -175,9 +194,20 @@ export function materializeLibraries(
     const manifest: SharedLibraryManifest = { name: library.specifier, version, main };
     if (type !== undefined) manifest.type = type;
 
+    const storedPkg = readStoreManifest(target);
+
+    // Every plugin clone that carries this library writes into the same slot, and clones
+    // in the same home can lag on different release channels. Whichever deployed last must
+    // not be allowed to downgrade a slot another clone already brought up to date.
+    if (fs.existsSync(path.join(target, "dist")) && storedPkg?.version !== undefined && isVersionHigherThan(storedPkg.version, version)) {
+      results.push({ specifier: library.specifier, status: "skipped", detail: `kept ${storedPkg.version} over ${version}` });
+      writeLog(`Kept ${library.specifier}@${storedPkg.version}, incoming ${version} is not newer`);
+      continue;
+    }
+
     // Callers run this on every deploy so a home that predates the store still gets
     // one, which means the common case is "already correct" and must not re-copy.
-    if (storeMatches(target, manifest)) {
+    if (storeMatches(target, manifest, storedPkg)) {
       results.push({ specifier: library.specifier, status: "current", detail: version });
       continue;
     }

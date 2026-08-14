@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { declaredLibraries, materializeLibraries, materializableLibraries, pruneAbandonedPluginStore, sharedStoreDir, submoduleTree, unbuiltLibraries } from "../shared-libs.js";
+import { declaredLibraries, isVersionHigherThan, materializeLibraries, materializableLibraries, pruneAbandonedPluginStore, sharedStoreDir, submoduleTree, unbuiltLibraries } from "../shared-libs.js";
 
 let workDir: string | undefined;
 afterEach(() => {
@@ -81,6 +81,34 @@ describe("submoduleTree", () => {
 
   it("returns nothing for a clone carrying no submodules", () => {
     expect(submoduleTree(makeClone({}))).toEqual([]);
+  });
+});
+
+describe("isVersionHigherThan", () => {
+  it("compares numerically rather than lexically", () => {
+    expect(isVersionHigherThan("0.10.0", "0.9.9")).toBe(true);
+    expect(isVersionHigherThan("0.9.9", "0.10.0")).toBe(false);
+  });
+
+  it("treats a higher leading segment as decisive regardless of the rest", () => {
+    expect(isVersionHigherThan("1.0.0", "0.999.0")).toBe(true);
+  });
+
+  it("finds a plain segment-by-segment increase", () => {
+    expect(isVersionHigherThan("0.3.3", "0.3.1")).toBe(true);
+    expect(isVersionHigherThan("0.3.1", "0.3.3")).toBe(false);
+  });
+
+  it("treats equal versions as not higher", () => {
+    expect(isVersionHigherThan("0.3.3", "0.3.3")).toBe(false);
+  });
+
+  it("treats a garbage or missing segment as 0 instead of throwing", () => {
+    expect(isVersionHigherThan("1.x.0", "1.0.5")).toBe(false);
+    expect(isVersionHigherThan("1.1.0", "1.x.5")).toBe(true);
+    expect(isVersionHigherThan("1.0", "1.0.0")).toBe(false);
+    expect(isVersionHigherThan("1.0.1", "1.0")).toBe(true);
+    expect(() => isVersionHigherThan("", "")).not.toThrow();
   });
 });
 
@@ -200,6 +228,40 @@ describe("materializeLibraries", () => {
 
     expect(results).toEqual([{ specifier: "@intisy-ai/core", status: "current", detail: "0.3.3" }]);
     expect(readFileSync(marker, "utf8")).toBe("untouched");
+  });
+
+  // The measured defect: four plugin clones disagree on core's version, and whichever
+  // deploys last used to win regardless of whether it was a downgrade.
+  it("leaves a higher store version alone when a clone offers a lower one", () => {
+    const sourceDir = makeClone({ core: { name: "core", version: "0.3.1", dist: { "index.js": "old" } } });
+    const configDir = join(workDir as string, "home");
+    const target = join(sharedStoreDir(configDir), "@intisy-ai", "core");
+    mkdirSync(join(target, "dist"), { recursive: true });
+    writeFileSync(join(target, "dist", "index.js"), "export const x = 1;\n");
+    writeFileSync(join(target, "package.json"), JSON.stringify({ name: "@intisy-ai/core", version: "0.3.3", main: "dist/index.js" }));
+    const marker = join(target, "marker.txt");
+    writeFileSync(marker, "untouched");
+
+    const results = materializeLibraries(sourceDir, configDir);
+
+    expect(results).toEqual([{ specifier: "@intisy-ai/core", status: "skipped", detail: "kept 0.3.3 over 0.3.1" }]);
+    expect(JSON.parse(readFileSync(join(target, "package.json"), "utf8"))).toMatchObject({ version: "0.3.3" });
+    expect(readFileSync(marker, "utf8")).toBe("untouched");
+  });
+
+  it("overwrites a lower store version when a clone offers a higher one", () => {
+    const sourceDir = makeClone({ core: { name: "core", version: "0.3.3", dist: { "index.js": "new" } } });
+    const configDir = join(workDir as string, "home");
+    const target = join(sharedStoreDir(configDir), "@intisy-ai", "core");
+    mkdirSync(join(target, "dist"), { recursive: true });
+    writeFileSync(join(target, "dist", "index.js"), "old");
+    writeFileSync(join(target, "package.json"), JSON.stringify({ name: "@intisy-ai/core", version: "0.3.1", main: "dist/index.js" }));
+
+    const results = materializeLibraries(sourceDir, configDir);
+
+    expect(results).toEqual([{ specifier: "@intisy-ai/core", status: "written", detail: "0.3.3" }]);
+    expect(readFileSync(join(target, "dist", "index.js"), "utf8")).toBe("new");
+    expect(JSON.parse(readFileSync(join(target, "package.json"), "utf8"))).toMatchObject({ version: "0.3.3" });
   });
 
   it("copies nested directories inside the library's dist", () => {
