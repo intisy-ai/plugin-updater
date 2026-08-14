@@ -116,10 +116,25 @@ export interface MaterializeResult {
   detail?: string;
 }
 
-function alreadyShared(target: string, version: string): boolean {
+// What materializeLibraries synthesizes and writes for a library, kept as a type so the
+// "is the store already correct" check can compare against it field by field.
+interface SharedLibraryManifest {
+  name: string;
+  version: string;
+  main: string;
+  type?: string;
+}
+
+// Compared field by field, not by stringifying both sides, so key order never forces a
+// pointless re-copy. A store written by an older version of this function (e.g. one that
+// hardcoded "type": "module") must be judged stale even when the version string hasn't
+// moved: libraries in this ecosystem change commits far more often than they change versions,
+// so a version-only check can never see a metadata correction like the mirrored "type" field.
+function storeMatches(target: string, expected: SharedLibraryManifest): boolean {
+  if (!fs.existsSync(path.join(target, "dist"))) return false;
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(target, "package.json"), "utf8")) as { version?: string };
-    return pkg.version === version && fs.existsSync(path.join(target, "dist"));
+    const pkg = JSON.parse(fs.readFileSync(path.join(target, "package.json"), "utf8")) as Partial<SharedLibraryManifest>;
+    return pkg.name === expected.name && pkg.version === expected.version && pkg.main === expected.main && pkg.type === expected.type;
   } catch {
     return false;
   }
@@ -157,9 +172,12 @@ export function materializeLibraries(
     } catch { /* the defaults above are correct for every library in this ecosystem */ }
 
     const target = path.join(sharedStoreDir(configDir), ...library.specifier.split("/"));
+    const manifest: SharedLibraryManifest = { name: library.specifier, version, main };
+    if (type !== undefined) manifest.type = type;
+
     // Callers run this on every deploy so a home that predates the store still gets
     // one, which means the common case is "already correct" and must not re-copy.
-    if (alreadyShared(target, version)) {
+    if (storeMatches(target, manifest)) {
       results.push({ specifier: library.specifier, status: "current", detail: version });
       continue;
     }
@@ -167,9 +185,7 @@ export function materializeLibraries(
       fs.rmSync(target, { recursive: true, force: true });
       copyDirectory(dist, path.join(target, "dist"));
       // A package.json is what makes the directory resolvable by name at all.
-      const storePackageJson: Record<string, unknown> = { name: library.specifier, version, main };
-      if (type !== undefined) storePackageJson.type = type;
-      fs.writeFileSync(path.join(target, "package.json"), JSON.stringify(storePackageJson, null, 2), "utf8");
+      fs.writeFileSync(path.join(target, "package.json"), JSON.stringify(manifest, null, 2), "utf8");
       results.push({ specifier: library.specifier, status: "written", detail: version });
       writeLog(`Shared ${library.specifier}@${version}`);
     } catch (e: unknown) {

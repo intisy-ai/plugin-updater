@@ -165,6 +165,43 @@ describe("materializeLibraries", () => {
     expect(() => readFileSync(join(target, "dist", "stale.js"), "utf8")).toThrow();
   });
 
+  // The live defect: a store written by an older version of this function (which hardcoded
+  // "type": "module") keeps failing to load a CommonJS library forever, because a version-only
+  // check can't see that the store's metadata no longer matches what the source declares.
+  it("rewrites a store entry whose type no longer matches the source, even though the version hasn't moved", () => {
+    const sourceDir = makeClone({ "core-loader": { name: "core-loader", version: "1.3.2", dist: { "index.js": "exports.x = 1;\n" } } });
+    const configDir = join(workDir as string, "home");
+    const target = join(sharedStoreDir(configDir), "@intisy-ai", "core-loader");
+    mkdirSync(join(target, "dist"), { recursive: true });
+    writeFileSync(join(target, "dist", "index.js"), "exports.x = 1;\n");
+    writeFileSync(
+      join(target, "package.json"),
+      JSON.stringify({ name: "@intisy-ai/core-loader", version: "1.3.2", type: "module", main: "dist/index.js" }),
+    );
+
+    const results = materializeLibraries(sourceDir, configDir);
+
+    expect(results).toEqual([{ specifier: "@intisy-ai/core-loader", status: "written", detail: "1.3.2" }]);
+    const pkg = JSON.parse(readFileSync(join(target, "package.json"), "utf8")) as Record<string, unknown>;
+    expect(pkg).not.toHaveProperty("type");
+  });
+
+  it("treats a store entry as current, and leaves it untouched, when it matches the source in every synthesized field", () => {
+    const sourceDir = makeClone({ core: { name: "core", version: "0.3.3", dist: { "index.js": "export const x = 1;\n" } } });
+    const configDir = join(workDir as string, "home");
+    const target = join(sharedStoreDir(configDir), "@intisy-ai", "core");
+    mkdirSync(join(target, "dist"), { recursive: true });
+    writeFileSync(join(target, "dist", "index.js"), "export const x = 1;\n");
+    writeFileSync(join(target, "package.json"), JSON.stringify({ name: "@intisy-ai/core", version: "0.3.3", main: "dist/index.js" }));
+    const marker = join(target, "marker.txt");
+    writeFileSync(marker, "untouched");
+
+    const results = materializeLibraries(sourceDir, configDir);
+
+    expect(results).toEqual([{ specifier: "@intisy-ai/core", status: "current", detail: "0.3.3" }]);
+    expect(readFileSync(marker, "utf8")).toBe("untouched");
+  });
+
   it("copies nested directories inside the library's dist", () => {
     const sourceDir = makeClone({ core: { name: "core", dist: { "index.js": "root" } } });
     mkdirSync(join(sourceDir, "core", "dist", "generated"), { recursive: true });
