@@ -97,6 +97,15 @@ plugin-updater add https://github.com/intisy-ai/antigravity-auth --sync
 | `uninstall(pluginItem)` | Remove repo and deployed files |
 | `registerTests(testApi)` | Register sync verification tests |
 
+## Host signals
+
+A host sets one of these environment variables to tell this plugin what it is doing. The `INTISY_PLUGIN_*` name is the contract; the `PLUGIN_UPDATER_*` name is accepted for a host built before the generic name existed.
+
+| Signal | Meaning |
+|---|---|
+| `INTISY_PLUGIN_LIBRARY_MODE` (or `PLUGIN_UPDATER_LIBRARY_MODE`) | The host imported this module for its API, not to activate it, so no update sequence runs on import. |
+| `INTISY_PLUGIN_ACTIVATION` (or `PLUGIN_UPDATER_ACTIVATION`) | An activation is already being driven, so this plugin must not start another and recurse. |
+
 ## Configuration
 
 Config file: `<configDir>/config/plugin-updater.json` (edit via the loader or `/plugin-updater-config set`).

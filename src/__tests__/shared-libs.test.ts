@@ -2,8 +2,22 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { declaredLibraries, isVersionHigherThan, materializeLibraries, materializableLibraries, pruneAbandonedPluginStore, sharedStoreDir, submoduleTree, unbuiltLibraries } from "../shared-libs.js";
+
+// ESM's "node:fs" namespace is non-configurable, so vi.spyOn can't touch rmSync directly.
+// This mock passes every call straight through to the real fs, except rmSync while
+// rmSyncFailure is armed, which lets one test simulate a locked file honestly.
+let rmSyncFailure: Error | null = null;
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  const rmSync: typeof actual.rmSync = (...args: Parameters<typeof actual.rmSync>) => {
+    if (rmSyncFailure) throw rmSyncFailure;
+    // @ts-expect-error - fs.rmSync overloads don't unify across the spread call
+    return actual.rmSync(...args);
+  };
+  return { ...actual, rmSync, default: { ...actual.default, rmSync } };
+});
 
 let workDir: string | undefined;
 afterEach(() => {
@@ -429,5 +443,26 @@ describe("pruneAbandonedPluginStore", () => {
     seedRealStore();
     expect(() => pruneAbandonedPluginStore(pluginDir, home)).not.toThrow();
     expect(existsSync(join(pluginDir, "node_modules"))).toBe(false);
+  });
+
+  // A locked file on Windows must never fail the caller's deploy/repair; it is retried
+  // on the next pass instead. This exercises that containment honestly, by making the
+  // removal itself fail rather than by simulating a real OS-level lock.
+  it("survives fs.rmSync throwing and reports the failure through writeLog", () => {
+    const abandoned = seedAbandonedStore();
+    seedRealStore();
+    rmSyncFailure = new Error("EBUSY: resource busy or locked");
+    const logged: Array<{ message: string; isError?: boolean }> = [];
+
+    try {
+      expect(() => pruneAbandonedPluginStore(pluginDir, home, (message, isError) => logged.push({ message, isError }))).not.toThrow();
+    } finally {
+      rmSyncFailure = null;
+    }
+
+    expect(existsSync(abandoned)).toBe(true);
+    const failure = logged.find((entry) => entry.message.includes(abandoned));
+    expect(failure).toMatchObject({ isError: true });
+    expect(failure?.message).toContain("EBUSY");
   });
 });
