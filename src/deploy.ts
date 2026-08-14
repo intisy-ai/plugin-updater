@@ -284,9 +284,9 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // because a TUI-driven self-update runs inside the `bun tui.js` process (not
   // opencode), so nothing else refreshes the oc/cc wrapper. Without this, the
   // wrapper keeps pointing at the stale/rebuilt TUI path and the command breaks
-  // until the next app restart. activate() is idempotent (installs the wrapper,
-  // earlyLaunch is guarded by PLUGIN_UPDATER_ACTIVATION), so the extra call under
-  // opencode's normal launch is harmless.
+  // until the next app restart. activate() is idempotent (the activation guard makes
+  // self-activation run at most once per process and tells the plugin one is already
+  // in progress), so the extra call under opencode's normal launch is harmless.
   const isLoader = isLoaderPlugin(sourceDir, pluginName);
   // Claude: the updater IS the runtime, so it must import + activate() every launch.
   // OpenCode imports deployed plugins itself, so only loaders need activate() (to

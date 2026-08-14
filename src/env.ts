@@ -106,8 +106,3 @@ export function setHostActivation(on: boolean): void {
     else delete process.env[key];
   }
 }
-
-/** Says this process imports plugin modules as libraries. */
-export function setLibraryMode(): void {
-  for (const key of LIBRARY_MODE_KEYS) process.env[key] = "1";
-}
