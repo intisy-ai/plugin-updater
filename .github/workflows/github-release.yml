@@ -2,6 +2,13 @@
 name: GitHub pre-release
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and release; empty takes the ref the run was started from'
+        required: false
+        type: string
+        default: ''
   push:
     tags:
       - 'gh-v*'
@@ -15,3 +22,4 @@ jobs:
     with:
       tag_prefix: 'gh-'
       patch_ceiling: 20
+      tag: ${{ inputs.tag }}
