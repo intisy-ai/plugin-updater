@@ -15,4 +15,5 @@ jobs:
     uses: intisy/workflows/.github/workflows/publish-npm.yml@main
     with:
       unscoped_name: 'plugin-updater'
+      scope: 'intisy-ai'
       patch_ceiling: 20
