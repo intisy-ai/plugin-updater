@@ -9,7 +9,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { execFileSync } from "child_process";
 import { isLoaderPlugin, deployEntryFile, missingDeclaredArtifacts } from "../deploy.js";
-import { materializeLibraries } from "../shared-libs.js";
+import { declaredLibraries, materializeLibraries } from "../shared-libs.js";
 
 describe("isLoaderPlugin", () => {
   let sourceDir: string;
@@ -111,7 +111,12 @@ describe("the deployed artifact", () => {
       writeFileSync(join(pluginDir, "package.json"), JSON.stringify({ type: "module" }), "utf8");
       copyFileSync(artifact, copied);
       const shared = materializeLibraries(process.cwd(), home);
-      expect(shared.every((r) => r.status === "written")).toBe(true);
+      // Scoped to what this plugin declares: the store also receives libraries nested inside those,
+      // and one this artifact never imports may sit unbuilt in the checkout without breaking it.
+      const declared = new Set(declaredLibraries(process.cwd()).map((library) => library.specifier));
+      expect(shared.filter((r) => declared.has(r.specifier))).toEqual([
+        { specifier: "@intisy-ai/core", status: "written", detail: expect.any(String) },
+      ]);
 
       const out = execFileSync(process.execPath, [copied, "config", "schema"], { encoding: "utf8" });
       const schema = JSON.parse(out.trim()) as { name: string; fields?: unknown[] };

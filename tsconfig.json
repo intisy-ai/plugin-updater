@@ -13,7 +13,7 @@
     // built output it resolves to at runtime.
     "paths": {
       "@intisy-ai/core": ["./core/dist/index.d.ts"],
-      "@intisy-ai/api": ["./core/api/dist/index.d.ts"]
+      "@intisy-ai/api": ["./core/api/generated/api.keys.d.ts"]
     }
   },
   "include": ["src/**/*"],

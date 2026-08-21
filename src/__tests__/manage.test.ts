@@ -142,7 +142,7 @@ describe("the plugin-management capability", () => {
       expect(typeof plugin.deactivate).toBe("function");
       await plugin.activate({
         paths: { home: process.env.HUB_CONFIG_DIR as string },
-        provide: (id: string) => { provided.push(id); },
+        provide: (key: string | { id: string }) => { provided.push(typeof key === "string" ? key : key.id); },
       } as never);
       expect(provided).toEqual(["plugin-management"]);
     });

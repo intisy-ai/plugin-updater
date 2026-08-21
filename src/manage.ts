@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ActionResult, ManagedPlugin, PluginManagementCapability } from "@intisy-ai/api";
+import type { ActionResult, ManagedPlugin, PluginManagementCapability } from "@intisy-ai/core";
 import { getEarlyLaunchConfigDir, setEarlyLaunchConfigDir } from "./env.js";
 import { getPlugins, getPluginsPath } from "./config.js";
 import { getLocalHead } from "./git.js";
