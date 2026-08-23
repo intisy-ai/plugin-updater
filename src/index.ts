@@ -16,13 +16,13 @@ import { updaterSchema, readUpdaterConfig } from "./schema.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { loadConfig, PLUGIN_MANAGEMENT, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "@intisy-ai/core";
+import { loadConfig, LIBRARY_MANAGEMENT, PLUGIN_MANAGEMENT, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "@intisy-ai/core";
 import type { AppDescriptor } from "@intisy-ai/core";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
 import type { Plugin as ApiPlugin, PluginContext } from "@intisy-ai/api";
-import { pluginManagement } from "./manage.js";
+import { libraryManagement, pluginManagement } from "./manage.js";
 import {
   emitPluginInstalled,
   emitPluginUpdated,
@@ -447,7 +447,15 @@ export async function activate(opencodeHookInput?: unknown): Promise<void | obje
 // directly, and the loader that imports it for its API, both predate the host and still work.
 const plugin: ApiPlugin = {
   activate(context: PluginContext) {
-    context.provide(PLUGIN_MANAGEMENT, pluginManagement(context.paths.home, { updatePluginPublic, uninstallPlugin }));
+    context.provide(PLUGIN_MANAGEMENT, pluginManagement(context.paths.home, {
+      updatePluginPublic,
+      uninstallPlugin,
+      updateOne,
+      updateAll,
+      downgrade,
+      pluginChannelState,
+    }));
+    context.provide(LIBRARY_MANAGEMENT, libraryManagement(context.paths.home));
   },
   deactivate() {},
 };

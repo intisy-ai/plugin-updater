@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pluginManagement, registerPluginEntry, removePluginEntry } from "../manage.js";
+import { libraryManagement, pluginManagement, registerPluginEntry, removePluginEntry } from "../manage.js";
 
 describe("registerPluginEntry", () => {
   let home: string;
@@ -77,11 +77,17 @@ describe("the plugin-management capability", () => {
     writeFileSync(join(home, "config", "plugins.json"), JSON.stringify(entries));
   }
 
+  const noOutcome = { updated: [], skipped: [], failed: [], checkedAt: "" };
+
   function capability(overrides: Record<string, unknown> = {}) {
     const calls: unknown[][] = [];
     const capability = pluginManagement(home, {
       updatePluginPublic: async (...args: unknown[]) => { calls.push(["update", ...args]); },
       uninstallPlugin: (...args: unknown[]) => { calls.push(["uninstall", ...args]); },
+      updateOne: async (...args: unknown[]) => { calls.push(["updateOne", ...args]); return noOutcome; },
+      updateAll: async (...args: unknown[]) => { calls.push(["updateAll", ...args]); return noOutcome; },
+      downgrade: (...args: unknown[]) => { calls.push(["downgrade", ...args]); return "moved to abc123"; },
+      pluginChannelState: () => ({ onExperimental: false, experimentalAvailable: null }),
       ...overrides,
     } as never);
     return { capability, calls };
@@ -126,6 +132,68 @@ describe("the plugin-management capability", () => {
     expect(result).toMatchObject({ ok: false, message: "plugin not found: absent" });
   });
 
+  // The entry module's WRAPPED updateOne is what registers the app a clone carries; routing an
+  // update at the raw runner in updates.ts would install without it, which no host could see.
+  it("updates through the entry module's wrapped runner, not the raw one", async () => {
+    listed([{ name: "demo", url: "https://github.com/intisy-ai/demo" }]);
+    const { capability: managed, calls } = capability();
+    expect(await managed.update("demo")).toMatchObject({ ok: true });
+    expect(calls).toEqual([["updateOne", home, "demo"]]);
+  });
+
+  it("names every plugin that failed a full update run", async () => {
+    listed([]);
+    const { capability: managed } = capability({
+      updateAll: async () => ({ updated: ["one"], skipped: [], failed: ["two", "three"], checkedAt: "" }),
+    });
+    expect(await managed.updateAll()).toMatchObject({ ok: false, message: "failed to update two, three" });
+  });
+
+  it("reports nothing to do as a success, so a host does not show a failure for a current home", async () => {
+    listed([]);
+    expect(await capability().capability.updateAll()).toMatchObject({ ok: true, message: "everything is current" });
+  });
+
+  it("writes an enabled flag and says what it did", async () => {
+    listed([{ name: "demo", url: "https://github.com/intisy-ai/demo" }]);
+    expect(await capability().capability.setEnabled("demo", false)).toMatchObject({ ok: true, message: "demo disabled" });
+    expect(JSON.parse(readFileSync(join(home, "config", "plugins.json"), "utf8"))[0].enabled).toBe(false);
+  });
+
+  // The underlying setter answers with a bare false for both "no such plugin" and "no list at all",
+  // so the capability has to turn that into a result a host can show rather than a silent no-op.
+  it("declines a setting for a plugin the home does not list", async () => {
+    listed([]);
+    const { capability: managed } = capability();
+    expect(await managed.setEnabled("absent", true)).toMatchObject({ ok: false, message: "no plugin absent in this home" });
+    expect(await managed.setAutoUpdate("absent", true)).toMatchObject({ ok: false });
+    expect(await managed.setChannel("absent", "experimental")).toMatchObject({ ok: false });
+  });
+
+  it("records a channel change against the entry", async () => {
+    listed([{ name: "demo", url: "https://github.com/intisy-ai/demo" }]);
+    expect(await capability().capability.setChannel("demo", "experimental")).toMatchObject({ ok: true, message: "demo tracks experimental" });
+    expect(JSON.parse(readFileSync(join(home, "config", "plugins.json"), "utf8"))[0].channel).toBe("experimental");
+  });
+
+  it("downgrades the entry the home lists, and declines one it does not", async () => {
+    listed([{ name: "demo", url: "https://github.com/intisy-ai/demo" }]);
+    const { capability: managed, calls } = capability();
+    expect(await managed.downgrade("demo", "abc123")).toMatchObject({ ok: true, message: "moved to abc123" });
+    expect(calls[0][0]).toBe("downgrade");
+    expect((calls[0][1] as { name: string }).name).toBe("demo");
+    expect(await managed.downgrade("absent", "abc123")).toMatchObject({ ok: false, message: "no plugin absent in this home" });
+  });
+
+  it("reads back the cache without going upstream", async () => {
+    listed([]);
+    const { getCachePath } = await import("../cache.js");
+    const file = getCachePath(home);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, JSON.stringify({ checkedAt: "2026-08-23T00:00:00.000Z", plugins: { demo: { kind: "git", updateAvailable: true } } }));
+    expect(await capability().capability.updateCache()).toMatchObject({ checkedAt: "2026-08-23T00:00:00.000Z" });
+  });
+
   it("leaves the ambient home exactly as it found it", async () => {
     listed([]);
     const { getEarlyLaunchConfigDir } = await import("../env.js");
@@ -144,7 +212,59 @@ describe("the plugin-management capability", () => {
         paths: { home: process.env.HUB_CONFIG_DIR as string },
         provide: (key: string | { id: string }) => { provided.push(typeof key === "string" ? key : key.id); },
       } as never);
-      expect(provided).toEqual(["plugin-management"]);
+      expect(provided).toEqual(["plugin-management", "library-management"]);
     });
+
+    // A host quarantines a provide the manifest never declared, so the two lists drifting apart
+    // costs the capability at run time while every unit test here still passes.
+    it("provides exactly what its manifest declares", async () => {
+      const provided: string[] = [];
+      const plugin = (await import("../index.js")).default;
+      await plugin.activate({
+        paths: { home: process.env.HUB_CONFIG_DIR as string },
+        provide: (key: string | { id: string }) => { provided.push(typeof key === "string" ? key : key.id); },
+      } as never);
+      const manifest = JSON.parse(readFileSync(new URL("../../plugin.json", import.meta.url), "utf8"));
+      expect(provided.slice().sort()).toEqual(manifest.capabilities.slice().sort());
+    });
+  });
+});
+
+// homeLibraries and removeLibrary are covered against their own fixtures in libraries.test.ts and
+// removeLibrary.test.ts; what is worth asserting here is that the capability reaches the home it was
+// resolved against, because that is the only thing the per-home handle adds.
+describe("the library-management capability", () => {
+  let home: string;
+  beforeEach(() => { home = mkdtempSync(join(tmpdir(), "pu-libcap-")); });
+  afterEach(() => { rmSync(home, { recursive: true, force: true }); });
+
+  function installLibrary(specifier: string, version: string): void {
+    const dir = join(home, "node_modules", ...specifier.split("/"));
+    mkdirSync(join(dir, "dist"), { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: specifier, version, main: "dist/index.js" }));
+    writeFileSync(join(dir, "dist", "index.js"), "");
+  }
+
+  function declare(plugin: string, submodule: string, packageName: string): void {
+    const dir = join(home, "repos", plugin);
+    mkdirSync(join(dir, submodule), { recursive: true });
+    writeFileSync(join(dir, ".gitmodules"), `[submodule "${submodule}"]
+	path = ${submodule}
+	url = https://example/${submodule}
+`);
+    writeFileSync(join(dir, submodule, "package.json"), JSON.stringify({ name: packageName }));
+  }
+
+  it("lists the libraries of the home it was resolved against", async () => {
+    installLibrary("@intisy-ai/core", "1.2.3");
+    declare("demo", "core", "@intisy-ai/core");
+    const answer = await libraryManagement(home).libraries();
+    expect(answer.shared).toEqual([{ specifier: "@intisy-ai/core", version: "1.2.3", usedBy: ["demo"] }]);
+  });
+
+  it("declines a removal while a plugin still declares it", async () => {
+    installLibrary("@intisy-ai/core", "1.2.3");
+    declare("demo", "core", "@intisy-ai/core");
+    expect(await libraryManagement(home).remove("@intisy-ai/core")).toEqual({ removed: false, usedBy: ["demo"] });
   });
 });
