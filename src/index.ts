@@ -12,11 +12,10 @@ import { readUpdateCache, writeUpdateCache } from "./cache.js";
 import { deployedIdFor, DEPLOYED_SUFFIXES } from "./manifest.js";
 // Importing this registers the config defaults and the capability schema, which must
 // happen before the CLI guard below so `config schema` answers.
-import { UPDATER_NAME, updaterSchema, readUpdaterConfig } from "./schema.js";
+import { UPDATER_NAME, UPDATER_DEFAULTS, updaterSchema, readUpdaterConfig } from "./schema.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { loadConfig, LIBRARY_MANAGEMENT, PLUGIN_MANAGEMENT, SETTINGS, createSettingsCapability, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "@intisy-ai/core";
+import { loadConfig, defineConfig, runConfigCli, LIBRARY_MANAGEMENT, PLUGIN_MANAGEMENT, SETTINGS, createSettingsCapability, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "@intisy-ai/core";
 import type { AppDescriptor } from "@intisy-ai/core";
 import path from "path";
 import fs from "fs";
@@ -146,7 +145,12 @@ plugin-updater add https://github.com/intisy-ai/antigravity-auth --sync
 
 if (maybeRunReadmeCli("plugin-updater")) process.exit(0);
 
-if (await maybeRunCli()) {
+// The PROBE contract, not a command: a surface asks a deployed bundle to print its own declaration.
+// Distinct from offering a user a way to edit settings, which belongs to whichever loader serves an
+// app. Retired once every surface reads the declaration from the manifest instead.
+if (process.argv[2] === "config") {
+  defineConfig(UPDATER_NAME, UPDATER_DEFAULTS);
+  runConfigCli(UPDATER_NAME, process.argv.slice(3));
   process.exit(0);
 }
 
@@ -371,10 +375,6 @@ async function earlyLaunchInScope(configDir: string, plugins: Plugin[], trigger:
   const defaultIntervalHours = typeof cfg.default_update_interval_hours === "number"
     ? cfg.default_update_interval_hours
     : 1;
-
-  // keep the cross-app /plugin-updater-config command deployed (idempotent) + the
-  // config file materialized (so it's discoverable in the home / agentbox data folder)
-  try { deployUpdaterCommands(); } catch { /* best-effort */ }
 
   // reconcile cross-app state (accounts, settings, configs, plugin list) BEFORE
   // building, then re-read the list so a freshly-synced-in plugin is cloned/built

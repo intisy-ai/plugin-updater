@@ -4,11 +4,38 @@
   "api": 1,
   "entry": "dist/plugin.js",
   "displayName": "Plugin Updater",
-  "capabilities": ["plugin-management", "library-management", "settings"],
+  "capabilities": [
+    "plugin-management",
+    "library-management",
+    "settings"
+  ],
   "repo": {
     "role": "Plugin lifecycle manager",
     "category": "tool",
-    "domains": ["claude", "opencode"],
+    "domains": [
+      "claude",
+      "opencode"
+    ],
     "tech": "typescript"
+  },
+  "config": {
+    "defaults": {
+      "logging": true,
+      "default_update_interval_hours": 1,
+      "git_timeout_seconds": 120,
+      "npm_timeout_seconds": 300,
+      "build_timeout_seconds": 300,
+      "daemon_health_timeout_ms": 1500,
+      "self_update": true,
+      "update_on_launch": true,
+      "auto_update_mode": "update",
+      "experimental": false,
+      "experimental_branch": "experimental",
+      "auto_update_triggers": {
+        "loader": true,
+        "app": true,
+        "cairn": true
+      }
+    }
   }
 }
