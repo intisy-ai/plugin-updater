@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+// @ts-ignore - generated bundle, no .d.ts
+import { submodulePaths, submoduleTree } from "@intisy-ai/core";
 
 // A library a plugin carries as a submodule and no longer inlines. The specifier
 // is what the plugin's built bundle imports; the store is where Node finds it.
@@ -17,33 +19,6 @@ const SCOPE = "@intisy-ai";
 // clone at <home>/repos/<name>/dist/. Only the home root is above both.
 export function sharedStoreDir(configDir: string): string {
   return path.join(configDir, "node_modules");
-}
-
-function readGitmodules(dir: string): string {
-  try {
-    return fs.readFileSync(path.join(dir, ".gitmodules"), "utf8");
-  } catch {
-    return "";
-  }
-}
-
-function submodulePaths(gitmodules: string): string[] {
-  return gitmodules
-    .split("\n")
-    .map((line) => /^\s*path\s*=\s*(.+)$/.exec(line.trim())?.[1]?.trim())
-    .filter((value): value is string => Boolean(value));
-}
-
-// Every submodule under a clone, nested ones included, as paths relative to it. A library
-// can itself carry libraries (core-proxy nests core-ir), and each has its own build output,
-// so anything reasoning about "what this clone builds" has to see the whole tree.
-export function submoduleTree(sourceDir: string, relative = ""): string[] {
-  const found: string[] = [];
-  for (const child of submodulePaths(readGitmodules(path.join(sourceDir, relative)))) {
-    const childPath = relative ? path.join(relative, child) : child;
-    found.push(childPath, ...submoduleTree(sourceDir, childPath));
-  }
-  return found;
 }
 
 // A submodule without a usable package.json is skipped rather than guessed at, since its
@@ -68,7 +43,7 @@ function librariesAt(sourceDir: string, relativePaths: string[]): SharedLibrary[
 // package name, never from a list here: adding a library is then a submodule and
 // nothing else. These are what the clone ships, so they are what gets materialized.
 export function declaredLibraries(sourceDir: string): SharedLibrary[] {
-  return librariesAt(sourceDir, submodulePaths(readGitmodules(sourceDir)));
+  return librariesAt(sourceDir, submodulePaths(sourceDir));
 }
 
 // The same set widened to the whole submodule tree. Asking "does anything still declare this
