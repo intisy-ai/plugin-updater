@@ -145,6 +145,10 @@ export function pluginManagement(home: string, deps: ManagementDeps): PluginMana
         version: getLocalHead(plugin.name) || "",
         enabled: plugin.enabled !== false,
         url: plugin.url,
+        // Absence means the plugin never declared one, which is not the same as declaring
+        // "inherit": a surface offering to change it has to be able to tell those apart.
+        autoUpdate: plugin.autoUpdate === undefined ? undefined : plugin.autoUpdate !== false,
+        channel: plugin.channel,
       })));
     },
     async install(url: string): Promise<ActionResult> {

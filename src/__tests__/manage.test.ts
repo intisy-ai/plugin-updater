@@ -100,8 +100,24 @@ describe("the plugin-management capability", () => {
       { name: "off", url: "https://github.com/intisy-ai/off", enabled: false },
     ]);
     expect(await capability().capability.list()).toEqual([
-      { id: "on", enabled: true, url: "https://github.com/intisy-ai/on", version: "" },
-      { id: "off", enabled: false, url: "https://github.com/intisy-ai/off", version: "" },
+      { id: "on", enabled: true, url: "https://github.com/intisy-ai/on", version: "", autoUpdate: undefined, channel: undefined },
+      { id: "off", enabled: false, url: "https://github.com/intisy-ai/off", version: "", autoUpdate: undefined, channel: undefined },
+    ]);
+  });
+
+  // A surface offering to change either of these has to read back what is set, and has to tell a
+  // plugin that declared nothing from one that declared "inherit".
+  it("reports the auto-update and channel each entry declares, and absence as absence", async () => {
+    listed([
+      { name: "pinned", url: "u", autoUpdate: false, channel: "experimental" },
+      { name: "undeclared", url: "u" },
+      { name: "inheriting", url: "u", channel: "inherit" },
+    ]);
+    const rows = await capability().capability.list();
+    expect(rows.map((row) => [row.id, row.autoUpdate, row.channel])).toEqual([
+      ["pinned", false, "experimental"],
+      ["undeclared", undefined, undefined],
+      ["inheriting", undefined, "inherit"],
     ]);
   });
 
