@@ -146,13 +146,6 @@ Config file: `<configDir>/config/plugin-updater.json` (edit via the loader or `/
 | `experimental_branch` | `"experimental"` |
 | `auto_update_triggers` | `{"loader":true,"app":true,"cairn":true}` |
 
-## Commands
-
-| Command | Description | Arguments |
-| --- | --- | --- |
-| `/plugin-updater-config` | View/change plugin-updater configuration | `list | get <key> | set <key> <value>` |
-| `/config` | View/change ANY plugin's settings and the global settings | `[global | <plugin>] [list | get <key> | set <key> <value>]` |
-
 ## Dependencies
 
 - `core`
