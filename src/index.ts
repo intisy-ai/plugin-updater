@@ -10,13 +10,11 @@ import { resolveMode, type Trigger } from "./policy.js";
 import { resolveBranch, tracksExperimental } from "./channel.js";
 import { readUpdateCache, writeUpdateCache } from "./cache.js";
 import { deployedIdFor, DEPLOYED_SUFFIXES } from "./manifest.js";
-// Importing this registers the config defaults and the capability schema, which must
-// happen before the CLI guard below so `config schema` answers.
-import { UPDATER_NAME, UPDATER_DEFAULTS, updaterSchema, readUpdaterConfig } from "./schema.js";
+import { UPDATER_NAME, UPDATER_SETTINGS, updaterSchema, readUpdaterConfig } from "./schema.js";
 // @ts-ignore — generated bundle, no .d.ts
 // @ts-ignore — generated bundle, no .d.ts
-import { loadConfig, defineConfig, runConfigCli, LIBRARY_MANAGEMENT, PLUGIN_MANAGEMENT, SETTINGS, createSettingsCapability, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "@intisy-ai/core";
-import type { AppDescriptor } from "@intisy-ai/core";
+import { loadConfig, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "@intisy-ai/core";
+import type { AppDescriptor, LibraryManagementCapability, PluginManagementCapability, SettingsCapability } from "@intisy-ai/core";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
@@ -76,20 +74,8 @@ defineReadme({
     end`,
   structure: {
     src: ["TypeScript source (`index` engine + `git`, `npm`, `deploy`, `config`, `log`, `env`, `syncbridge`, `cli`, `commands`)."],
-    dist: ["`dist/index.js` — plugin entry + the `node … config` CLI; `dist/cli.js` — the `plugin-updater` bin."],
+    dist: ["`dist/index.js` — the plugin entry; `dist/cli.js` — the `plugin-updater` bin."],
   },
-  commands: [
-    {
-      name: "plugin-updater-config",
-      description: "View/change plugin-updater configuration",
-      argumentHint: "list | get <key> | set <key> <value>",
-    },
-    {
-      name: "config",
-      description: "View/change ANY plugin's settings and the global settings",
-      argumentHint: "[global | <plugin>] [list | get <key> | set <key> <value>]",
-    },
-  ],
   dependencies: ["core", "sync-bridge"],
   extraSections: [
     {
@@ -144,15 +130,6 @@ plugin-updater add https://github.com/intisy-ai/antigravity-auth --sync
 });
 
 if (maybeRunReadmeCli("plugin-updater")) process.exit(0);
-
-// The PROBE contract, not a command: a surface asks a deployed bundle to print its own declaration.
-// Distinct from offering a user a way to edit settings, which belongs to whichever loader serves an
-// app. Retired once every surface reads the declaration from the manifest instead.
-if (process.argv[2] === "config") {
-  defineConfig(UPDATER_NAME, UPDATER_DEFAULTS);
-  runConfigCli(UPDATER_NAME, process.argv.slice(3));
-  process.exit(0);
-}
 
 // remove repos/ clones and deployed plugin/ files for plugins no longer in
 // plugins.json, so a removed/renamed plugin stops showing up
@@ -477,7 +454,7 @@ export async function activate(opencodeHookInput?: unknown): Promise<void | obje
 // directly, and the loader that imports it for its API, both predate the host and still work.
 const plugin: ApiPlugin = {
   activate(context: PluginContext) {
-    context.provide(PLUGIN_MANAGEMENT, pluginManagement(context.paths.home, {
+    context.provide(context.capability<PluginManagementCapability>("plugin-management"), pluginManagement(context.paths.home, {
       updatePluginPublic,
       uninstallPlugin,
       updateOne,
@@ -486,13 +463,13 @@ const plugin: ApiPlugin = {
       downgrade,
       pluginChannelState,
     }));
-    context.provide(LIBRARY_MANAGEMENT, libraryManagement(context.paths.home));
+    context.provide(context.capability<LibraryManagementCapability>("library-management"), libraryManagement(context.paths.home));
     // Fields only, no actions: every action this plugin has is a lifecycle one already reachable
     // through plugin-management, so a settings surface has nothing of its own to run here.
-    context.provide(SETTINGS, createSettingsCapability(UPDATER_NAME, (actionId: string) => ({
-      ok: false,
-      message: `${UPDATER_NAME} declares no action "${actionId}"`,
-    })));
+    context.provide(context.capability<SettingsCapability>("settings"), {
+      schema: () => UPDATER_SETTINGS,
+      run: async (actionId: string) => ({ ok: false, message: `${UPDATER_NAME} declares no action "${actionId}"` }),
+    });
   },
   deactivate() {},
 };

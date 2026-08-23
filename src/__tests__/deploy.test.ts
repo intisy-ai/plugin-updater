@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { pathToFileURL } from "url";
 import { execFileSync } from "child_process";
 import { isLoaderPlugin, deployEntryFile, missingDeclaredArtifacts } from "../deploy.js";
 import { declaredLibraries, materializeLibraries } from "../shared-libs.js";
@@ -100,7 +101,7 @@ describe("the deployed artifact", () => {
   // The artifact carries its own code but no longer its libraries, so it is exercised
   // the way a home actually holds it: the file beside the shared store the updater
   // materialises. Copying it somewhere with neither is not a deployment.
-  it("answers config schema when deployed beside its shared libraries", () => {
+  it("loads as a plugin when deployed beside its shared libraries", () => {
     const home = mkdtempSync(join(tmpdir(), "pu-artifact-"));
     try {
       const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { pluginEntry?: string };
@@ -122,10 +123,12 @@ describe("the deployed artifact", () => {
       // carried both the nesting and the directory or the execFileSync below cannot even load.
       expect(existsSync(join(home, "node_modules", "@intisy-ai", "api", "generated", "engine.js"))).toBe(true);
 
-      const out = execFileSync(process.execPath, [copied, "config", "schema"], { encoding: "utf8" });
-      const schema = JSON.parse(out.trim()) as { name: string; fields?: unknown[] };
-      expect(schema.name).toBe("plugin-updater");
-      expect(Array.isArray(schema.fields)).toBe(true);
+      // Importing the copy is the proof, because that is exactly what a host does with it: the
+      // artifact resolves its libraries BY NAME, so it loads only if the store beside it carries
+      // every one of them.
+      const script = `import(${JSON.stringify(pathToFileURL(copied).href)}).then((m) => process.stdout.write(Object.keys(m.default).sort().join(",")))`;
+      const out = execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" });
+      expect(out.trim()).toBe("activate,deactivate");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

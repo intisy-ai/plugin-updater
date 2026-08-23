@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { defineCapabilities, getCapabilities } from "@intisy-ai/core";
-import type { ActionSpec, FieldSpec } from "@intisy-ai/core";
+import type { ActionSpec, CapabilitySchema, FieldSpec } from "@intisy-ai/core";
 
 export const UPDATER_NAME = "plugin-updater";
 
@@ -27,7 +26,9 @@ export const UPDATER_DEFAULTS: Record<string, unknown> = {
   auto_update_triggers: { loader: true, app: true, cairn: true },
 };
 
-defineCapabilities(UPDATER_NAME, {
+// What each setting is called and how a surface renders it, beside the values the manifest
+// declares. Data the settings capability answers with.
+export const UPDATER_SETTINGS: CapabilitySchema = {
   fields: [
     { key: "logging", type: "boolean", label: "Logging", group: "General" },
     { key: "self_update", type: "boolean", label: "Self-update", description: "Keep plugin-updater itself current.", group: "Updates" },
@@ -48,7 +49,7 @@ defineCapabilities(UPDATER_NAME, {
     { key: "build_timeout_seconds", type: "number", label: "Build timeout (s)", min: 1, group: "Timeouts" },
     { key: "daemon_health_timeout_ms", type: "number", label: "Daemon health timeout (ms)", min: 0, group: "Timeouts" },
   ],
-});
+};
 
 // Config as it is on disk NOW. core's loadConfig caches per home for the life of the
 // process (including the absence of a file, which is what a plugin sees when it loads
@@ -81,6 +82,6 @@ export function updaterSchema(configDir: string): UpdaterSchema {
     plugin: UPDATER_NAME,
     defaults: UPDATER_DEFAULTS,
     current: readUpdaterConfig(configDir),
-    ...getCapabilities(UPDATER_NAME),
+    ...UPDATER_SETTINGS,
   };
 }
