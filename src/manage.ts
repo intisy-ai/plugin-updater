@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type {
   ActionResult, HomeLibraries, LibraryManagementCapability, LibraryRemoval, ManagedNpmPlugin, ManagedPlugin,
-  PluginChannel, PluginChannelState, PluginDataEntry, PluginManagementCapability, PluginUpdateCache,
+  PluginChannel, PluginChannelState, PluginDataEntry, PluginManagementCapability, PluginUpdateCache, UpdateTrigger,
 } from "@intisy-ai/core";
 import { getEarlyLaunchConfigDir, setEarlyLaunchConfigDir } from "./env.js";
 import { getPlugins, getPluginsPath, setPluginAutoUpdate, setPluginChannel, setPluginEnabled } from "./config.js";
@@ -97,6 +97,7 @@ export interface ManagementDeps {
   uninstallPlugin: (configDir: string, name: string) => void;
   updateOne: (configDir: string, name: string) => Promise<UpdateOutcome>;
   updateAll: (configDir: string) => Promise<UpdateOutcome>;
+  runUpdates: (configDir: string, trigger: UpdateTrigger) => Promise<UpdateOutcome>;
   downgrade: (plugin: { name: string; url?: string; branch?: string }, commitHash: string) => string;
   pluginChannelState: (configDir: string, name: string) => PluginChannelState;
 }
@@ -104,6 +105,11 @@ export interface ManagementDeps {
 function wrote(changed: boolean, id: string, what: string): ActionResult {
   if (changed) return { ok: true, message: `${id} ${what}` };
   return { ok: false, message: `no plugin ${id} in this home` };
+}
+
+function ran(outcome: UpdateOutcome): ActionResult {
+  if (outcome.failed.length) return { ok: false, message: `failed to update ${outcome.failed.join(", ")}` };
+  return { ok: true, message: outcome.updated.length ? `updated ${outcome.updated.join(", ")}` : "everything is current" };
 }
 
 function applied(outcome: UpdateOutcome, id: string): ActionResult {
@@ -151,6 +157,10 @@ export function pluginManagement(home: string, deps: ManagementDeps): PluginMana
         return failed(error);
       }
     },
+    async register(url: string): Promise<ManagedPlugin> {
+      const entry = registerPluginEntry(home, url);
+      return { id: entry.name, url: entry.url, enabled: true, version: "" };
+    },
     async update(id: string): Promise<ActionResult> {
       try {
         return applied(await inHome(() => deps.updateOne(home, id)), id);
@@ -160,9 +170,14 @@ export function pluginManagement(home: string, deps: ManagementDeps): PluginMana
     },
     async updateAll(): Promise<ActionResult> {
       try {
-        const outcome = await inHome(() => deps.updateAll(home));
-        if (outcome.failed.length) return { ok: false, message: `failed to update ${outcome.failed.join(", ")}` };
-        return { ok: true, message: outcome.updated.length ? `updated ${outcome.updated.join(", ")}` : "everything is current" };
+        return ran(await inHome(() => deps.updateAll(home)));
+      } catch (error) {
+        return failed(error);
+      }
+    },
+    async runUpdates(trigger: UpdateTrigger): Promise<ActionResult> {
+      try {
+        return ran(await inHome(() => deps.runUpdates(home, trigger)));
       } catch (error) {
         return failed(error);
       }

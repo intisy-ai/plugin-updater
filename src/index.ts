@@ -452,6 +452,7 @@ const plugin: ApiPlugin = {
       uninstallPlugin,
       updateOne,
       updateAll,
+      runUpdates,
       downgrade,
       pluginChannelState,
     }));

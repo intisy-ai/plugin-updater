@@ -17,8 +17,8 @@ describe("plugin.json", () => {
     expect(() => assertManifest(manifest)).not.toThrow();
   });
 
-  it("declares the capability that makes this the plugin manager", () => {
-    expect(manifest.capabilities).toEqual(["plugin-management"]);
+  it("declares the capabilities that make this the plugin manager", () => {
+    expect(manifest.capabilities).toEqual(["plugin-management", "library-management"]);
   });
 
   it("points its entry at the bundle deploy actually copies", () => {

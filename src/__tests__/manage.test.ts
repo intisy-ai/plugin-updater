@@ -86,6 +86,7 @@ describe("the plugin-management capability", () => {
       uninstallPlugin: (...args: unknown[]) => { calls.push(["uninstall", ...args]); },
       updateOne: async (...args: unknown[]) => { calls.push(["updateOne", ...args]); return noOutcome; },
       updateAll: async (...args: unknown[]) => { calls.push(["updateAll", ...args]); return noOutcome; },
+      runUpdates: async (...args: unknown[]) => { calls.push(["runUpdates", ...args]); return noOutcome; },
       downgrade: (...args: unknown[]) => { calls.push(["downgrade", ...args]); return "moved to abc123"; },
       pluginChannelState: () => ({ onExperimental: false, experimentalAvailable: null }),
       ...overrides,
@@ -139,6 +140,24 @@ describe("the plugin-management capability", () => {
     const { capability: managed, calls } = capability();
     expect(await managed.update("demo")).toMatchObject({ ok: true });
     expect(calls).toEqual([["updateOne", home, "demo"]]);
+  });
+
+  it("registers an entry without setting it up, and answers with it", async () => {
+    listed([]);
+    const { capability: managed, calls } = capability();
+    expect(await managed.register("https://github.com/intisy-ai/demo-plugin.git"))
+      .toEqual({ id: "demo-plugin", url: "https://github.com/intisy-ai/demo-plugin", enabled: true, version: "" });
+    expect(calls).toEqual([]);
+    expect(JSON.parse(readFileSync(join(home, "config", "plugins.json"), "utf8"))[0].name).toBe("demo-plugin");
+  });
+
+  // updateAll and runUpdates differ in exactly one way and it is the whole point of having both:
+  // runUpdates carries the occasion, so the home's own policy can decline it.
+  it("carries the occasion into a policy-aware run", async () => {
+    listed([]);
+    const { capability: managed, calls } = capability();
+    expect(await managed.runUpdates("cairn")).toMatchObject({ ok: true });
+    expect(calls).toEqual([["runUpdates", home, "cairn"]]);
   });
 
   it("names every plugin that failed a full update run", async () => {
