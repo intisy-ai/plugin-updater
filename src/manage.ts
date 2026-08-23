@@ -227,6 +227,7 @@ export function pluginManagement(home: string, deps: ManagementDeps): PluginMana
         name: plugin.name,
         version: plugin.version,
         installed: plugin.installed,
+        entryPath: plugin.entryPath,
       })));
     },
     async removeNpm(id: string): Promise<ActionResult> {
