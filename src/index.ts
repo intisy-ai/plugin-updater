@@ -8,7 +8,7 @@ import { syncAllAcrossApps } from "./syncbridge.js";
 import { checkUpdates, runAutoUpdate, updateOne as updateOneInHome, updateAll as updateAllInHome } from "./updates.js";
 import { resolveMode, type Trigger } from "./policy.js";
 import { resolveBranch, tracksExperimental } from "./channel.js";
-import { readUpdateCache } from "./cache.js";
+import { readUpdateCache, writeUpdateCache } from "./cache.js";
 import { deployedIdFor, DEPLOYED_SUFFIXES } from "./manifest.js";
 // Importing this registers the config defaults and the capability schema, which must
 // happen before the CLI guard below so `config schema` answers.
@@ -246,8 +246,38 @@ export async function updatePluginPublic(
   if (commitHash) setPluginCommitHash(configDir, pluginName, commitHash);
   else setPluginCommitHash(configDir, pluginName, null);
   await deployToExecutionDir(pluginName, getPluginDir(configDir), result.changed, configDir);
+  recordInstalledHead(configDir, pluginName);
   if (result.changed) onInstalled(pluginName, getLocalHead(pluginName), previousVersion, "manual");
   else registerAppFromClone(pluginName);
+}
+
+/**
+ * Records what this home now has of a plugin, so its update badge is not read from nothing.
+ *
+ * @remarks
+ * A check writes the cache for every plugin it looks at, but the very first install of one happens
+ * before any check has ever seen it, so without this a freshly installed plugin reads as behind
+ * until the next check comes round.
+ */
+function recordInstalledHead(configDir: string, pluginName: string): void {
+  try {
+    const head = getLocalHead(pluginName);
+    if (!head) return;
+    const cache = readUpdateCache(configDir);
+    const previous = cache.plugins[pluginName];
+    cache.checkedAt = new Date().toISOString();
+    cache.plugins[pluginName] = {
+      kind: "git",
+      installedVersion: previous?.installedVersion ?? null,
+      localHead: head,
+      remoteHead: head,
+      latestVersion: previous?.latestVersion ?? null,
+      updateAvailable: false,
+      experimentalAvailable: previous?.experimentalAvailable ?? null,
+      updatedAt: cache.checkedAt,
+    };
+    writeUpdateCache(configDir, cache);
+  } catch { /* a stale badge is not worth failing a finished install over */ }
 }
 
 export interface PluginChannelState {
