@@ -18,7 +18,7 @@ describe("plugin.json", () => {
   });
 
   it("declares the capabilities that make this the plugin manager", () => {
-    expect(manifest.capabilities).toEqual(["plugin-management", "library-management"]);
+    expect(manifest.capabilities).toEqual(["plugin-management", "library-management", "settings"]);
   });
 
   it("points its entry at the bundle deploy actually copies", () => {

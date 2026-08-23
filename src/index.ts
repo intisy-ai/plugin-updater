@@ -12,11 +12,11 @@ import { readUpdateCache } from "./cache.js";
 import { deployedIdFor, DEPLOYED_SUFFIXES } from "./manifest.js";
 // Importing this registers the config defaults and the capability schema, which must
 // happen before the CLI guard below so `config schema` answers.
-import { updaterSchema, readUpdaterConfig } from "./schema.js";
+import { UPDATER_NAME, updaterSchema, readUpdaterConfig } from "./schema.js";
 // @ts-ignore — generated bundle, no .d.ts
 import { maybeRunCli, deployUpdaterCommands } from "./commands.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { loadConfig, LIBRARY_MANAGEMENT, PLUGIN_MANAGEMENT, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "@intisy-ai/core";
+import { loadConfig, LIBRARY_MANAGEMENT, PLUGIN_MANAGEMENT, SETTINGS, createSettingsCapability, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "@intisy-ai/core";
 import type { AppDescriptor } from "@intisy-ai/core";
 import path from "path";
 import fs from "fs";
@@ -457,6 +457,12 @@ const plugin: ApiPlugin = {
       pluginChannelState,
     }));
     context.provide(LIBRARY_MANAGEMENT, libraryManagement(context.paths.home));
+    // Fields only, no actions: every action this plugin has is a lifecycle one already reachable
+    // through plugin-management, so a settings surface has nothing of its own to run here.
+    context.provide(SETTINGS, createSettingsCapability(UPDATER_NAME, (actionId: string) => ({
+      ok: false,
+      message: `${UPDATER_NAME} declares no action "${actionId}"`,
+    })));
   },
   deactivate() {},
 };

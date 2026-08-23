@@ -231,7 +231,7 @@ describe("the plugin-management capability", () => {
         paths: { home: process.env.HUB_CONFIG_DIR as string },
         provide: (key: string | { id: string }) => { provided.push(typeof key === "string" ? key : key.id); },
       } as never);
-      expect(provided).toEqual(["plugin-management", "library-management"]);
+      expect(provided).toEqual(["plugin-management", "library-management", "settings"]);
     });
 
     // A host quarantines a provide the manifest never declared, so the two lists drifting apart
