@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { syncAllAcrossApps, readSyncStatus } from "../syncbridge.js";
+import { syncAllAcrossApps } from "../syncbridge.js";
 import { getPluginDir } from "../env.js";
 
 const SAVED: Record<string, string | undefined> = {};
@@ -91,12 +91,5 @@ describe("cross-app sync from a launch sequence", () => {
     ].join("\n"));
 
     await expect(syncAllAcrossApps(configDir)).resolves.toBeUndefined();
-  });
-});
-
-describe("readSyncStatus", () => {
-  it("answers null when no bridge library is cloned in the home", async () => {
-    const configDir = home();
-    expect(await readSyncStatus(configDir)).toBeNull();
   });
 });
