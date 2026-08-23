@@ -67,6 +67,16 @@ export function registerPluginEntry(configDir: string, url: string, opts: Regist
     return { name, url: cleanUrl, branch: opts.branch, added: true, syncEnabled: opts.sync === true, changed: true };
   }
 
+  // Re-registering from a different repository repoints the entry. That is what installing a fork
+  // over an existing plugin means, and losing it would leave the entry naming a repo the next
+  // update would pull from instead of the one just asked for.
+  if (existing.url !== cleanUrl) {
+    existing.url = cleanUrl;
+    if (opts.sync) existing.sync = true;
+    writeEntries(file, entries);
+    return { name, url: cleanUrl, branch: opts.branch, added: false, syncEnabled: existing.sync === true, changed: true };
+  }
+
   if (opts.sync && existing.sync !== true) {
     existing.sync = true;
     writeEntries(file, entries);

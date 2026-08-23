@@ -29,6 +29,14 @@ describe("registerPluginEntry", () => {
     expect(entries()).toHaveLength(1);
   });
 
+  it("repoints an entry re-registered from a different repository", () => {
+    registerPluginEntry(home, "https://github.com/intisy-ai/demo-plugin");
+    const again = registerPluginEntry(home, "https://github.com/someone/demo-plugin");
+    expect(again).toMatchObject({ added: false, changed: true, url: "https://github.com/someone/demo-plugin" });
+    expect(entries()).toHaveLength(1);
+    expect(entries()[0].url).toBe("https://github.com/someone/demo-plugin");
+  });
+
   it("turns sync on for an entry that is already listed without it", () => {
     registerPluginEntry(home, "https://github.com/intisy-ai/demo-plugin");
     const again = registerPluginEntry(home, "https://github.com/intisy-ai/demo-plugin", { sync: true });
