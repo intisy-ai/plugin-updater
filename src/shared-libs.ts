@@ -123,6 +123,37 @@ interface SharedLibraryManifest {
   version: string;
   main: string;
   type?: string;
+  // Mirrored from the library's own declaration, because a subpath like `@intisy-ai/api/engine`
+  // resolves through `exports` and through nothing else: without it Node looks for an `engine.js`
+  // beside the package root and the import fails, however complete the copied files are.
+  exports?: unknown;
+}
+
+/**
+ * The directories a library's own `package.json` actually points at.
+ *
+ * @remarks
+ * Derived rather than assumed. Most libraries here ship `dist/`, but `api` ships `generated/`, and
+ * a store built on the assumption copies files nothing references while leaving `main` pointing at
+ * a file that was never copied. Every path in `main`, `types` and `exports` contributes its first
+ * segment, so a library is carried by what it declares rather than by what it is expected to look
+ * like.
+ */
+function referencedDirs(pkg: { main?: string; types?: string; exports?: unknown }): string[] {
+  const dirs = new Set<string>();
+  const add = (value: unknown): void => {
+    if (typeof value !== "string" || !value.startsWith(".")) return;
+    const [first] = value.replace(/^\.\/?/, "").split("/");
+    if (first && first !== "." && !first.endsWith(".js") && !first.endsWith(".json")) dirs.add(first);
+  };
+  const walk = (value: unknown): void => {
+    if (typeof value === "string") { add(value); return; }
+    if (value && typeof value === "object") for (const nested of Object.values(value)) walk(nested);
+  };
+  add(pkg.main);
+  add(pkg.types);
+  walk(pkg.exports);
+  return dirs.size > 0 ? [...dirs] : ["dist"];
 }
 
 // Compared field by field, not by stringifying both sides, so key order never forces a
@@ -138,8 +169,14 @@ function readStoreManifest(target: string): Partial<SharedLibraryManifest> | und
   }
 }
 
-function storeMatches(target: string, expected: SharedLibraryManifest, pkg: Partial<SharedLibraryManifest> | undefined): boolean {
-  if (!fs.existsSync(path.join(target, "dist"))) return false;
+function storeMatches(
+  target: string,
+  expected: SharedLibraryManifest,
+  pkg: Partial<SharedLibraryManifest> | undefined,
+  dirs: string[],
+): boolean {
+  if (!dirs.every((dir) => fs.existsSync(path.join(target, dir)))) return false;
+  if (JSON.stringify(pkg?.exports ?? null) !== JSON.stringify(expected.exports ?? null)) return false;
   return pkg?.name === expected.name && pkg?.version === expected.version && pkg?.main === expected.main && pkg?.type === expected.type;
 }
 
@@ -170,36 +207,43 @@ export function materializeLibraries(
   const results: MaterializeResult[] = [];
 
   for (const library of materializableLibraries(sourceDir)) {
-    const dist = path.join(library.dir, "dist");
-    if (!fs.existsSync(dist)) {
-      results.push({ specifier: library.specifier, status: "skipped", detail: "not built" });
-      continue;
-    }
-
     let version = "0.0.0";
     let main = "dist/index.js";
     let type: string | undefined; // mirrors the source library's own declaration; core-loader has none (CommonJS)
+    let declared: { main?: string; types?: string; exports?: unknown } = {};
     try {
       const pkg = JSON.parse(fs.readFileSync(path.join(library.dir, "package.json"), "utf8")) as {
         version?: string;
         main?: string;
+        types?: string;
         type?: string;
+        exports?: unknown;
       };
+      declared = pkg;
       if (typeof pkg.version === "string") version = pkg.version;
       if (typeof pkg.main === "string") main = pkg.main;
       if (typeof pkg.type === "string") type = pkg.type;
-    } catch { /* the defaults above are correct for every library in this ecosystem */ }
+    } catch { /* the defaults below are correct for every library that declares nothing */ }
+
+    // A library is "not built" when NONE of what it points at is present. Requiring all of them
+    // would refuse a library whose optional subpath happens not to be generated in this checkout.
+    const dirs = referencedDirs(declared).filter((dir) => fs.existsSync(path.join(library.dir, dir)));
+    if (dirs.length === 0) {
+      results.push({ specifier: library.specifier, status: "skipped", detail: "not built" });
+      continue;
+    }
 
     const target = path.join(sharedStoreDir(configDir), ...library.specifier.split("/"));
     const manifest: SharedLibraryManifest = { name: library.specifier, version, main };
     if (type !== undefined) manifest.type = type;
+    if (declared.exports !== undefined) manifest.exports = declared.exports;
 
     const storedPkg = readStoreManifest(target);
 
     // Every plugin clone that carries this library writes into the same slot, and clones
     // in the same home can lag on different release channels. Whichever deployed last must
     // not be allowed to downgrade a slot another clone already brought up to date.
-    if (fs.existsSync(path.join(target, "dist")) && storedPkg?.version !== undefined && isVersionHigherThan(storedPkg.version, version)) {
+    if (dirs.some((dir) => fs.existsSync(path.join(target, dir))) && storedPkg?.version !== undefined && isVersionHigherThan(storedPkg.version, version)) {
       results.push({ specifier: library.specifier, status: "skipped", detail: `kept ${storedPkg.version} over ${version}` });
       writeLog(`Kept ${library.specifier}@${storedPkg.version}, incoming ${version} is not newer`);
       continue;
@@ -207,13 +251,13 @@ export function materializeLibraries(
 
     // Callers run this on every deploy so a home that predates the store still gets
     // one, which means the common case is "already correct" and must not re-copy.
-    if (storeMatches(target, manifest, storedPkg)) {
+    if (storeMatches(target, manifest, storedPkg, dirs)) {
       results.push({ specifier: library.specifier, status: "current", detail: version });
       continue;
     }
     try {
       fs.rmSync(target, { recursive: true, force: true });
-      copyDirectory(dist, path.join(target, "dist"));
+      for (const dir of dirs) copyDirectory(path.join(library.dir, dir), path.join(target, dir));
       // A package.json is what makes the directory resolvable by name at all.
       fs.writeFileSync(path.join(target, "package.json"), JSON.stringify(manifest, null, 2), "utf8");
       results.push({ specifier: library.specifier, status: "written", detail: version });

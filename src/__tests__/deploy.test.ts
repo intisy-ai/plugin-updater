@@ -4,7 +4,7 @@
 // (registerAppFromClone only populates the registry AFTER deploy completes), so this
 // locks in that manifest-reading behavior directly.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { execFileSync } from "child_process";
@@ -114,9 +114,13 @@ describe("the deployed artifact", () => {
       // Scoped to what this plugin declares: the store also receives libraries nested inside those,
       // and one this artifact never imports may sit unbuilt in the checkout without breaking it.
       const declared = new Set(declaredLibraries(process.cwd()).map((library) => library.specifier));
-      expect(shared.filter((r) => declared.has(r.specifier))).toEqual([
-        { specifier: "@intisy-ai/core", status: "written", detail: expect.any(String) },
-      ]);
+      expect(shared.filter((r) => declared.has(r.specifier)).map((r) => r.specifier).sort())
+        .toEqual(["@intisy-ai/core", "@intisy-ai/plugin-host"]);
+
+      // api is NESTED under plugin-host rather than declared here, and its entry points live in
+      // generated/ rather than dist/. The artifact imports it by name, so the store must have
+      // carried both the nesting and the directory or the execFileSync below cannot even load.
+      expect(existsSync(join(home, "node_modules", "@intisy-ai", "api", "generated", "engine.js"))).toBe(true);
 
       const out = execFileSync(process.execPath, [copied, "config", "schema"], { encoding: "utf8" });
       const schema = JSON.parse(out.trim()) as { name: string; fields?: unknown[] };

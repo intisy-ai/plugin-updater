@@ -13,9 +13,10 @@ await build({
   format: "esm",
   target: "node20",
   logLevel: "info",
-  // Materialised once per home by this package itself, rather than carried by
-  // every plugin that uses it.
-  external: ["@intisy-ai/core"],
+  // Materialised once per home by this package itself, rather than carried by every plugin that
+  // uses it. api is external for the same reason and for a sharper one: its generated engine is
+  // 782 KB, nine times this whole bundle, so a private copy would dominate the deployed artifact.
+  external: ["@intisy-ai/core", "@intisy-ai/api", "@intisy-ai/api/engine"],
 });
 
 console.log("Bundled plugin-updater -> dist/plugin.js (deployed artifact)");

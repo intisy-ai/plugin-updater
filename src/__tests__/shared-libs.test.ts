@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { declaredLibraries, isVersionHigherThan, materializeLibraries, materializableLibraries, pruneAbandonedPluginStore, sharedStoreDir, submoduleTree, unbuiltLibraries } from "../shared-libs.js";
@@ -25,7 +26,18 @@ afterEach(() => {
   workDir = undefined;
 });
 
-function makeClone(submodules: Record<string, { name?: string; version?: string; type?: string; dist?: Record<string, string> }>): string {
+interface CloneSpec {
+  name?: string;
+  version?: string;
+  type?: string;
+  main?: string;
+  exports?: unknown;
+  dist?: Record<string, string>;
+  // Directories other than dist/, for a library whose entry points live somewhere else.
+  files?: Record<string, Record<string, string>>;
+}
+
+function makeClone(submodules: Record<string, CloneSpec>): string {
   workDir = mkdtempSync(join(tmpdir(), "plugin-updater-shared-"));
   const sourceDir = join(workDir, "repos", "example");
   mkdirSync(sourceDir, { recursive: true });
@@ -42,13 +54,18 @@ function makeClone(submodules: Record<string, { name?: string; version?: string;
     const dir = join(sourceDir, relative);
     mkdirSync(dir, { recursive: true });
     if (spec.name !== undefined) {
-      const pkg: Record<string, unknown> = { name: spec.name, version: spec.version ?? "1.0.0", main: "dist/index.js" };
+      const pkg: Record<string, unknown> = { name: spec.name, version: spec.version ?? "1.0.0", main: spec.main ?? "dist/index.js" };
       if (spec.type !== undefined) pkg.type = spec.type;
+      if (spec.exports !== undefined) pkg.exports = spec.exports;
       writeFileSync(join(dir, "package.json"), JSON.stringify(pkg));
     }
     if (spec.dist) {
       mkdirSync(join(dir, "dist"), { recursive: true });
       for (const [file, content] of Object.entries(spec.dist)) writeFileSync(join(dir, "dist", file), content);
+    }
+    for (const [name, contents] of Object.entries(spec.files ?? {})) {
+      mkdirSync(join(dir, name), { recursive: true });
+      for (const [file, content] of Object.entries(contents)) writeFileSync(join(dir, name, file), content);
     }
   }
   return sourceDir;
@@ -141,6 +158,66 @@ describe("materializeLibraries", () => {
       version: "0.3.0",
       main: "dist/index.js",
     });
+  });
+
+  // api's entry points all live in generated/, not dist/. A store that copies dist/ and nothing
+  // else left main pointing at a file it never wrote, and skipped the library outright as "not
+  // built" whenever dist/ was absent. What a library declares is what has to be carried.
+  it("carries the directories a library points at, not an assumed dist/", () => {
+    const sourceDir = makeClone({
+      api: {
+        name: "api",
+        version: "0.3.0",
+        type: "module",
+        main: "generated/keys.js",
+        exports: { ".": { default: "./generated/keys.js" }, "./engine": { default: "./generated/engine.js" } },
+        files: { generated: { "keys.js": "export const API_VERSION = 1;", "engine.js": "export const started = true;" } },
+      },
+    });
+    const configDir = join(workDir as string, "home");
+
+    expect(materializeLibraries(sourceDir, configDir))
+      .toEqual([{ specifier: "@intisy-ai/api", status: "written", detail: "0.3.0" }]);
+
+    const target = join(sharedStoreDir(configDir), "@intisy-ai", "api");
+    expect(readFileSync(join(target, "generated", "engine.js"), "utf8")).toBe("export const started = true;");
+    // Mirrored, because a subpath resolves through exports and through nothing else.
+    expect(JSON.parse(readFileSync(join(target, "package.json"), "utf8")).exports)
+      .toEqual({ ".": { default: "./generated/keys.js" }, "./engine": { default: "./generated/engine.js" } });
+  });
+
+  // The decisive check: not that the right bytes were copied, but that Node resolves the subpath
+  // from a deployed bundle's position. An unresolvable import does not degrade, it stops the
+  // plugin loading at all, so this asserts the real import rather than the file layout.
+  it("leaves a store a deployed bundle can actually import a subpath from", async () => {
+    const sourceDir = makeClone({
+      api: {
+        name: "api",
+        type: "module",
+        main: "generated/keys.js",
+        exports: { "./engine": { default: "./generated/engine.js" } },
+        files: { generated: { "engine.js": "export const started = true;" } },
+      },
+    });
+    const configDir = join(workDir as string, "home");
+    materializeLibraries(sourceDir, configDir);
+
+    // Exactly where deploy puts a bundle: <home>/plugin/<name>.js, which resolves bare specifiers
+    // by walking up to <home>/node_modules.
+    const bundle = join(configDir, "plugin", "consumer.mjs");
+    mkdirSync(join(configDir, "plugin"), { recursive: true });
+    writeFileSync(bundle, 'export { started } from "@intisy-ai/api/engine";');
+
+    const loaded = (await import(pathToFileURL(bundle).href)) as { started: boolean };
+    expect(loaded.started).toBe(true);
+  });
+
+  it("skips a library whose declared directories are all absent", () => {
+    const sourceDir = makeClone({ api: { name: "api", main: "generated/keys.js" } });
+    const configDir = join(workDir as string, "home");
+
+    expect(materializeLibraries(sourceDir, configDir))
+      .toEqual([{ specifier: "@intisy-ai/api", status: "skipped", detail: "not built" }]);
   });
 
   // core-loader ships CommonJS and declares no "type" at all. Hardcoding "type": "module"
