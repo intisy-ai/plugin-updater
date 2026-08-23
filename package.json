@@ -35,7 +35,7 @@
     "postbuild": "node dist/index.js readme",
     "test": "npm run build && vitest run",
     "prepublishOnly": "npm run build",
-    "build:deps": "npm --prefix core install && npm --prefix core run build && npm --prefix plugin-host install && npm --prefix plugin-host run build"
+    "build:deps": "npm --prefix core install && npm --prefix core run build"
   },
   "devDependencies": {
     "esbuild": "^0.25.12",
@@ -45,7 +45,6 @@
   },
   "dependencies": {
     "@intisy-ai/core": "file:core",
-    "@intisy-ai/plugin-host": "file:plugin-host",
-    "@intisy-ai/api": "file:plugin-host/api"
+    "@intisy-ai/api": "file:core/api"
   }
 }

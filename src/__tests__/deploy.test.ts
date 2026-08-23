@@ -116,9 +116,9 @@ describe("the deployed artifact", () => {
       // and one this artifact never imports may sit unbuilt in the checkout without breaking it.
       const declared = new Set(declaredLibraries(process.cwd()).map((library) => library.specifier));
       expect(shared.filter((r) => declared.has(r.specifier)).map((r) => r.specifier).sort())
-        .toEqual(["@intisy-ai/core", "@intisy-ai/plugin-host"]);
+        .toEqual(["@intisy-ai/core"]);
 
-      // api is NESTED under plugin-host rather than declared here, and its entry points live in
+      // api is NESTED under core rather than declared here, and its entry points live in
       // generated/ rather than dist/. The artifact imports it by name, so the store must have
       // carried both the nesting and the directory or the execFileSync below cannot even load.
       expect(existsSync(join(home, "node_modules", "@intisy-ai", "api", "generated", "engine.js"))).toBe(true);
