@@ -37,13 +37,13 @@
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "esbuild": "^0.25.12",
     "@types/node": "^22.0.0",
+    "esbuild": "^0.25.12",
     "typescript": "^5.0.0",
     "vitest": "^3.2.6"
   },
   "dependencies": {
-    "@intisy-ai/core": "^1.1.0",
-    "@intisy-ai/api": "^1.0.2"
+    "@intisy-ai/api": "^1.0.2",
+    "@intisy-ai/core": "^2.0.0"
   }
 }

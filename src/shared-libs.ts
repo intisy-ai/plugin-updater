@@ -3,12 +3,10 @@
 // @ts-ignore - generated bundle, no .d.ts
 export {
   materializeLibraries,
-  materializableLibraries,
   declaredLibraries,
-  declaredLibraryTree,
-  unbuiltLibraries,
+  dropLibrary,
+  mergeRange,
   pruneAbandonedPluginStore,
   sharedStoreDir,
-  isVersionHigherThan,
 } from "@intisy-ai/core";
-export type { SharedLibrary, MaterializeResult } from "@intisy-ai/core";
+export type { SharedLibrary, MaterializeResult, MergedRange, StoreInstaller } from "@intisy-ai/core";

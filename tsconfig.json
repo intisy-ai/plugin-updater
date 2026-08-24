@@ -8,13 +8,7 @@
     "declaration": true,
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true,
-    // Compiled from the submodule, not installed, so the specifier maps to the
-    // built output it resolves to at runtime.
-    "paths": {
-      "@intisy-ai/core": ["./core/dist/index.d.ts"],
-      "@intisy-ai/api": ["./core/api/generated/api.keys.d.ts"]
-    }
+    "skipLibCheck": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "src/**/*.test.ts"]

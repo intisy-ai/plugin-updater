@@ -6,7 +6,7 @@ import { getAppName, getReposDir, setHostActivation } from "./env.js";
 import { writeLog } from "./log.js";
 import { buildInTempDir } from "./git.js";
 import { startDeclaredDaemon } from "./daemon.js";
-import { materializeLibraries, pruneAbandonedPluginStore, unbuiltLibraries } from "./shared-libs.js";
+import { declaredLibraries, materializeLibraries, pruneAbandonedPluginStore, sharedStoreDir } from "./shared-libs.js";
 import { readCloneManifest, syncManifestSidecar } from "./manifest.js";
 // @ts-ignore - generated bundle, no .d.ts
 import { deployBundle, deployEntryFile, repoHead } from "@intisy-ai/core";
@@ -83,26 +83,29 @@ function importsByName(shipped: string, packageName: string): boolean {
   return new RegExp(`["'\`]${escaped}(/[^"'\`]*)?["'\`]`).test(shipped);
 }
 
-// An unbuilt library is only this plugin's problem when its shipped code still imports it by
-// name: a plugin that inlines its libraries at build time carries no reference to them and
-// runs fine with the submodule unbuilt, so calling it broken would send it to a repair it
-// does not need. The entry files are read only once a library already looks unbuilt, which
-// keeps the healthy case to a handful of existsSync calls.
-function unimportableLibraries(sourceDir: string, entryFiles: string[]): string[] {
-  const unbuilt = unbuiltLibraries(sourceDir);
-  if (unbuilt.length === 0) return [];
+/**
+ * Libraries the shipped code imports by name that the home's store cannot resolve.
+ *
+ * @remarks
+ * Only the ones actually imported: a plugin that inlines its libraries at build time carries no
+ * reference to them, so naming those would send it to a repair it does not need. This is worth
+ * reporting even when the clone's own build is complete, because a bare import that does not
+ * resolve is not a degraded plugin - it is a plugin that never loads.
+ */
+export function unresolvableLibraries(sourceDir: string, configDir: string, packageJsonPath: string): string[] {
+  const declared = declaredLibraries(sourceDir);
+  if (declared.length === 0) return [];
 
-  const shipped = entryFiles.map((file) => readOrEmpty(path.join(sourceDir, file))).join("\n");
-  return unbuilt
-    .filter((library) => importsByName(shipped, library.specifier))
-    .map((library) => path.posix.join(path.relative(sourceDir, library.dir).split(path.sep).join("/"), "dist"));
+  const shipped = declaredEntryFiles(packageJsonPath).map((file) => readOrEmpty(path.join(sourceDir, file))).join("\n");
+  return declared
+    .filter((library: { specifier: string }) => importsByName(shipped, library.specifier))
+    .filter((library: { specifier: string }) => !fs.existsSync(path.join(sharedStoreDir(configDir), ...library.specifier.split("/"), "package.json")))
+    .map((library: { specifier: string }) => library.specifier);
 }
 
-// Files the clone says it ships but that the build did not produce. A plugin's main entry
-// landing is not proof the build finished: a provider also declares handlers, and a clone
-// missing one still loads while its accounts and routing do not work. Returned relative to
-// the clone so the caller can name them.
-export function missingDeclaredArtifacts(sourceDir: string, packageJsonPath: string): string[] {
+// Every file a clone's package.json says it ships: the main entry, the plugin entry, and a
+// provider's handlers. A plugin's main entry landing is not proof the build finished.
+function declaredEntryFiles(packageJsonPath: string): string[] {
   let pkg: {
     main?: string;
     pluginEntry?: string;
@@ -119,9 +122,14 @@ export function missingDeclaredArtifacts(sourceDir: string, packageJsonPath: str
     pkg.pluginEntry,
     ...(pkg.claudeHub?.authProviders ?? pkg.authProviders ?? []).map((p) => p.handler),
   ].filter((f): f is string => typeof f === "string" && f.length > 0);
-  const entryFiles = [...new Set(declared)];
-  const missing = entryFiles.filter((file) => !fs.existsSync(path.join(sourceDir, file)));
-  return [...missing, ...unimportableLibraries(sourceDir, entryFiles)];
+  return [...new Set(declared)];
+}
+
+// Files the clone says it ships but that the build did not produce: a clone missing a handler
+// still loads while its accounts and routing do not work. Returned relative to the clone so the
+// caller can name them.
+export function missingDeclaredArtifacts(sourceDir: string, packageJsonPath: string): string[] {
+  return declaredEntryFiles(packageJsonPath).filter((file) => !fs.existsSync(path.join(sourceDir, file)));
 }
 
 export async function deployToExecutionDir(pluginName: string, executionPath: string, changed: boolean, configDir: string): Promise<boolean> {
@@ -154,12 +162,7 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   // Fast path: nothing changed, the deployed file is in place, AND it matches the clone's
   // HEAD. Skips the build/install AND (below) the copy + plugin re-import + re-activate,
   // which otherwise cost ~1s+ per plugin on EVERY launch and blocked startup.
-  // A library the clone declares but never built cannot be put in the home's store, so the
-  // plugin that imports it by name fails to load. Only a build produces it, and the fast path
-  // is what skips that build, which is why such a home never repaired itself on any launch.
-  const unbuilt = unbuiltLibraries(sourceDir);
-  if (unbuilt.length > 0) writeLog(`${pluginName} declares ${unbuilt.map((l) => l.specifier).join(", ")} with no build output — forcing rebuild`, true);
-  const nothingToDeploy = !changed && deployedExists && !artifactStale && incomplete.length === 0 && unbuilt.length === 0;
+  const nothingToDeploy = !changed && deployedExists && !artifactStale && incomplete.length === 0;
 
   let buildComplete = true;
   if (nothingToDeploy) {
@@ -195,6 +198,12 @@ export async function deployToExecutionDir(pluginName: string, executionPath: st
   materializeLibraries(sourceDir, configDir, writeLog);
   // Self-heals a home still shadowed by the store's old location (see pruneAbandonedPluginStore).
   pruneAbandonedPluginStore(executionPath, configDir, writeLog);
+  // Asked AFTER the store was filled, so a hit means the install did not deliver what this
+  // plugin's shipped code imports, rather than that the store had simply not been built yet.
+  const unresolvable = unresolvableLibraries(sourceDir, configDir, packageJsonPath);
+  if (unresolvable.length > 0) {
+    writeLog(`${pluginName} imports ${unresolvable.join(", ")}, which the home's store does not carry; it will fail to load`, true);
+  }
 
   if (nothingToDeploy) {
     // The sidecar is written even on this pass, since a host answers every identity and capability

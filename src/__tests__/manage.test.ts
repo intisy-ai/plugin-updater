@@ -292,26 +292,22 @@ describe("the library-management capability", () => {
     writeFileSync(join(dir, "dist", "index.js"), "");
   }
 
-  function declare(plugin: string, submodule: string, packageName: string): void {
+  function declare(plugin: string, packageName: string): void {
     const dir = join(home, "repos", plugin);
-    mkdirSync(join(dir, submodule), { recursive: true });
-    writeFileSync(join(dir, ".gitmodules"), `[submodule "${submodule}"]
-	path = ${submodule}
-	url = https://example/${submodule}
-`);
-    writeFileSync(join(dir, submodule, "package.json"), JSON.stringify({ name: packageName }));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: plugin, dependencies: { [packageName]: "^1.0.0" } }));
   }
 
   it("lists the libraries of the home it was resolved against", async () => {
     installLibrary("@intisy-ai/core", "1.2.3");
-    declare("demo", "core", "@intisy-ai/core");
+    declare("demo", "@intisy-ai/core");
     const answer = await libraryManagement(home).libraries();
     expect(answer.shared).toEqual([{ specifier: "@intisy-ai/core", version: "1.2.3", usedBy: ["demo"] }]);
   });
 
   it("declines a removal while a plugin still declares it", async () => {
     installLibrary("@intisy-ai/core", "1.2.3");
-    declare("demo", "core", "@intisy-ai/core");
+    declare("demo", "@intisy-ai/core");
     expect(await libraryManagement(home).remove("@intisy-ai/core")).toEqual({ removed: false, usedBy: ["demo"] });
   });
 });
