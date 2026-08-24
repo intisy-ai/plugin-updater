@@ -31,11 +31,10 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build": "npm run build:deps && tsc && node build.mjs",
+    "build": "tsc && node build.mjs",
     "postbuild": "node dist/index.js readme",
     "test": "npm run build && vitest run",
-    "prepublishOnly": "npm run build",
-    "build:deps": "npm --prefix core install && npm --prefix core run build"
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "esbuild": "^0.25.12",
