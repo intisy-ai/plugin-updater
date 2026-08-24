@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 // @ts-ignore - built output of the nested checkout, resolved by relative path like the contract test
-import { assertManifest } from "../../core/api/generated/engine.js";
+import { assertManifest } from "@intisy-ai/api/engine";
 
 // fileURLToPath, not new URL().pathname: on Windows the latter yields a leading-slash path that
 // doubles the drive letter when joined.

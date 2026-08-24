@@ -111,7 +111,7 @@ describe("earlyLaunch update-status cache", () => {
     // current and the other opted out of automatic updates, yet both still get accurate
     // cache entries above, which is what this test is about. Progress for a plugin that
     // IS pulled is covered in runAutoUpdate.test.ts.
-    const { drain } = await import("../../core/src/index.js");
+    const { drain } = await import("@intisy-ai/core");
     const events: { topic: string; payload: { details?: { name?: string }; impact?: string } }[] = [];
     drain("cache-test", (e: typeof events[number]) => events.push(e));
     const progress = events.filter((e) => e.topic === "plugin.progress");
