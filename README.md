@@ -50,7 +50,7 @@ flowchart TD
 - `src/`
   - TypeScript source (`index` engine + `git`, `npm`, `deploy`, `config`, `log`, `env`, `syncbridge`, `cli`, `commands`).
 - `dist/`
-  - `dist/index.js` — plugin entry + the `node … config` CLI; `dist/cli.js` — the `plugin-updater` bin.
+  - `dist/index.js` — the plugin entry; `dist/cli.js` — the `plugin-updater` bin.
 
 ## Installation
 
@@ -108,7 +108,7 @@ A host sets one of these environment variables to tell this plugin what it is do
 
 ## Configuration
 
-Config file: `<configDir>/config/plugin-updater.json` (edit via the loader or `/plugin-updater-config set`).
+Config file: `<configDir>/config/plugin-updater.json` (edit it directly, or through whatever settings surface the app offers).
 
 ```json
 {
@@ -145,13 +145,6 @@ Config file: `<configDir>/config/plugin-updater.json` (edit via the loader or `/
 | `experimental` | `false` |
 | `experimental_branch` | `"experimental"` |
 | `auto_update_triggers` | `{"loader":true,"app":true,"cairn":true}` |
-
-## Commands
-
-| Command | Description | Arguments |
-| --- | --- | --- |
-| `/plugin-updater-config` | View/change plugin-updater configuration | `list | get <key> | set <key> <value>` |
-| `/config` | View/change ANY plugin's settings and the global settings | `[global | <plugin>] [list | get <key> | set <key> <value>]` |
 
 ## Dependencies
 
