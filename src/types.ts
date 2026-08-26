@@ -18,6 +18,8 @@ export interface NpmPlugin {
   version: string;
   installed: boolean;
   raw: string;
+  /** The package's entry file in this home, absent when nothing resolves it. */
+  entryPath?: string;
 }
 
 export interface DaemonManifest {

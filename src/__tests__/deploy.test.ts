@@ -4,12 +4,13 @@
 // (registerAppFromClone only populates the registry AFTER deploy completes), so this
 // locks in that manifest-reading behavior directly.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync } from "fs";
+import { cpSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { pathToFileURL } from "url";
 import { execFileSync } from "child_process";
-import { isLoaderPlugin, deployEntryFile, missingDeclaredArtifacts } from "../deploy.js";
-import { materializeLibraries } from "../shared-libs.js";
+import { isLoaderPlugin, deployEntryFile, missingDeclaredArtifacts, unresolvableLibraries } from "../deploy.js";
+import { declaredLibraries, materializeLibraries } from "../shared-libs.js";
 
 describe("isLoaderPlugin", () => {
   let sourceDir: string;
@@ -96,11 +97,34 @@ describe("deployEntryFile", () => {
   });
 });
 
+// Stands in for `npm install --prefix <home>`, copying out of this repo's own installed
+// packages instead of reaching the registry. The closure is taken from what npm already
+// resolved here, so the home ends up holding exactly what a real install would put there.
+function localInstaller(configDir: string): void {
+  const manifest = JSON.parse(readFileSync(join(configDir, "package.json"), "utf8")) as {
+    dependencies?: Record<string, string>;
+  };
+  const pending = Object.keys(manifest.dependencies ?? {});
+  const done = new Set<string>();
+  while (pending.length > 0) {
+    const specifier = pending.pop() as string;
+    if (done.has(specifier)) continue;
+    done.add(specifier);
+    const from = join(process.cwd(), "node_modules", ...specifier.split("/"));
+    if (!existsSync(from)) continue;
+    cpSync(from, join(configDir, "node_modules", ...specifier.split("/")), { recursive: true });
+    const pkg = JSON.parse(readFileSync(join(from, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
+    for (const dependency of Object.keys(pkg.dependencies ?? {})) {
+      if (dependency.startsWith("@intisy-ai/") && !done.has(dependency)) pending.push(dependency);
+    }
+  }
+}
+
 describe("the deployed artifact", () => {
   // The artifact carries its own code but no longer its libraries, so it is exercised
   // the way a home actually holds it: the file beside the shared store the updater
   // materialises. Copying it somewhere with neither is not a deployment.
-  it("answers config schema when deployed beside its shared libraries", () => {
+  it("loads as a plugin when deployed beside its shared libraries", () => {
     const home = mkdtempSync(join(tmpdir(), "pu-artifact-"));
     try {
       const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { pluginEntry?: string };
@@ -110,13 +134,20 @@ describe("the deployed artifact", () => {
       const copied = join(pluginDir, "plugin-updater.js");
       writeFileSync(join(pluginDir, "package.json"), JSON.stringify({ type: "module" }), "utf8");
       copyFileSync(artifact, copied);
-      const shared = materializeLibraries(process.cwd(), home);
-      expect(shared.every((r) => r.status === "written")).toBe(true);
+      const shared = materializeLibraries(process.cwd(), home, () => {}, localInstaller);
+      const declared = declaredLibraries(process.cwd()).map((library: { specifier: string }) => library.specifier).sort();
+      expect(shared.map((r) => r.specifier).sort()).toEqual(declared);
 
-      const out = execFileSync(process.execPath, [copied, "config", "schema"], { encoding: "utf8" });
-      const schema = JSON.parse(out.trim()) as { name: string; fields?: unknown[] };
-      expect(schema.name).toBe("plugin-updater");
-      expect(Array.isArray(schema.fields)).toBe(true);
+      // api's entry points live in generated/ rather than dist/, and the artifact imports it by
+      // name, so the store has to carry that directory or the execFileSync below cannot even load.
+      expect(existsSync(join(home, "node_modules", "@intisy-ai", "api", "generated", "engine.js"))).toBe(true);
+
+      // Importing the copy is the proof, because that is exactly what a host does with it: the
+      // artifact resolves its libraries BY NAME, so it loads only if the store beside it carries
+      // every one of them.
+      const script = `import(${JSON.stringify(pathToFileURL(copied).href)}).then((m) => process.stdout.write(Object.keys(m.default).sort().join(",")))`;
+      const out = execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" });
+      expect(out.trim()).toBe("activate,deactivate");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -176,17 +207,29 @@ describe("missingDeclaredArtifacts", () => {
     writeFileSync(join(sourceDir, "package.json"), "{ not json");
     expect(missingDeclaredArtifacts(sourceDir, join(sourceDir, "package.json"))).toEqual([]);
   });
+});
 
-  // The library set comes from .gitmodules, the same source shared-libs uses, so a test that
-  // seeds a library has to declare it as a submodule the way a real clone does.
-  function writeLibrarySubmodule(dir: string, packageName: string, built: boolean): void {
-    writeFileSync(join(sourceDir, ".gitmodules"), `[submodule "${dir}"]\n\tpath = ${dir}\n\turl = https://example/${dir}\n`);
-    mkdirSync(join(sourceDir, dir), { recursive: true });
-    writeFileSync(join(sourceDir, dir, "package.json"), JSON.stringify({ name: packageName, main: "dist/index.js" }));
-    if (built) {
-      mkdirSync(join(sourceDir, dir, "dist"), { recursive: true });
-      writeFileSync(join(sourceDir, dir, "dist", "index.js"), "");
-    }
+// A bare import that does not resolve is not a degraded plugin: it never loads. So a library the
+// shipped code names and the home's store does not carry is worth reporting on its own.
+describe("unresolvableLibraries", () => {
+  let sourceDir: string;
+  let home: string;
+  beforeEach(() => {
+    sourceDir = mkdtempSync(join(tmpdir(), "pu-unresolvable-"));
+    home = mkdtempSync(join(tmpdir(), "pu-unresolvable-home-"));
+    mkdirSync(join(sourceDir, "dist"), { recursive: true });
+  });
+  afterEach(() => {
+    rmSync(sourceDir, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  const providerPkg = { main: "dist/index.js", authProviders: [{ handler: "dist/handler.js" }] };
+
+  function writeClone(library: string): string {
+    const pkgPath = join(sourceDir, "package.json");
+    writeFileSync(pkgPath, JSON.stringify({ ...providerPkg, dependencies: { [library]: "^1.0.0" } }));
+    return pkgPath;
   }
 
   function writeShippedFiles(handlerSource: string): void {
@@ -194,40 +237,44 @@ describe("missingDeclaredArtifacts", () => {
     writeFileSync(join(sourceDir, "dist", "handler.js"), handlerSource);
   }
 
-  it("names an unbuilt library the shipped handler still imports by name", () => {
-    const pkgPath = writePkg(providerPkg);
+  function putInStore(specifier: string): void {
+    const dir = join(home, "node_modules", ...specifier.split("/"));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: specifier, version: "1.0.0" }));
+  }
+
+  it("names a library the shipped handler imports that the store does not carry", () => {
+    const pkgPath = writeClone("@intisy-ai/core-auth");
     writeShippedFiles(`import { listAccounts } from "@intisy-ai/core-auth";`);
-    writeLibrarySubmodule("core-auth", "@intisy-ai/core-auth", false);
-    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual(["core-auth/dist"]);
+    expect(unresolvableLibraries(sourceDir, home, pkgPath)).toEqual(["@intisy-ai/core-auth"]);
   });
 
   it("names it for a deep import of the same library", () => {
-    const pkgPath = writePkg(providerPkg);
+    const pkgPath = writeClone("@intisy-ai/core-auth");
     writeShippedFiles(`import { listAccounts } from "@intisy-ai/core-auth/dist/accounts.js";`);
-    writeLibrarySubmodule("core-auth", "@intisy-ai/core-auth", false);
-    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual(["core-auth/dist"]);
+    expect(unresolvableLibraries(sourceDir, home, pkgPath)).toEqual(["@intisy-ai/core-auth"]);
   });
 
-  it("reports nothing once the library is built too", () => {
-    const pkgPath = writePkg(providerPkg);
+  it("reports nothing once the store carries it", () => {
+    const pkgPath = writeClone("@intisy-ai/core-auth");
     writeShippedFiles(`import { listAccounts } from "@intisy-ai/core-auth";`);
-    writeLibrarySubmodule("core-auth", "@intisy-ai/core-auth", true);
-    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual([]);
+    putInStore("@intisy-ai/core-auth");
+    expect(unresolvableLibraries(sourceDir, home, pkgPath)).toEqual([]);
   });
 
-  // A plugin that inlines its libraries runs fine with the submodule unbuilt, so calling
-  // it broken would send every such plugin to a repair it does not need.
-  it("holds no opinion about an unbuilt library the plugin inlined at build time", () => {
-    const pkgPath = writePkg(providerPkg);
+  // A plugin that inlines its libraries at build time carries no reference to them, so naming
+  // those would send every such plugin to a repair it does not need.
+  it("holds no opinion about a declared library the plugin never imports", () => {
+    const pkgPath = writeClone("@intisy-ai/core-auth");
     writeShippedFiles(`function listAccounts() { return []; }`);
-    writeLibrarySubmodule("core-auth", "@intisy-ai/core-auth", false);
-    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual([]);
+    expect(unresolvableLibraries(sourceDir, home, pkgPath)).toEqual([]);
   });
 
-  it("holds no opinion about a clone that declares no submodules at all", () => {
-    const pkgPath = writePkg(providerPkg);
+  it("holds no opinion about a clone that declares no libraries at all", () => {
+    const pkgPath = join(sourceDir, "package.json");
+    writeFileSync(pkgPath, JSON.stringify(providerPkg));
     writeShippedFiles(`import { issuer } from "@openauthjs/openauth";`);
-    expect(missingDeclaredArtifacts(sourceDir, pkgPath)).toEqual([]);
+    expect(unresolvableLibraries(sourceDir, home, pkgPath)).toEqual([]);
   });
 });
 

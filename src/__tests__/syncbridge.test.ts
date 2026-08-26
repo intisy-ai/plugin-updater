@@ -1,40 +1,95 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { syncAllAcrossApps, readSyncStatus } from "../syncbridge.js";
+import { syncAllAcrossApps } from "../syncbridge.js";
+import { getPluginDir } from "../env.js";
 
-function fakeBridge(marker: string): string {
+const SAVED: Record<string, string | undefined> = {};
+const KEYS = ["HUB_CONFIG_DIR", "PLUGIN_UPDATER_APP"];
+
+afterEach(() => {
+  for (const key of KEYS) {
+    if (SAVED[key] === undefined) delete process.env[key];
+    else process.env[key] = SAVED[key] as string;
+  }
+});
+
+function home(): string {
+  for (const key of KEYS) SAVED[key] = process.env[key];
   const dir = mkdtempSync(join(tmpdir(), "pu-sb-"));
-  const libDir = join(dir, "repos", "sync-bridge", "dist");
-  mkdirSync(libDir, { recursive: true });
-  writeFileSync(
-    join(libDir, "lib.js"),
-    `import { writeFileSync } from "fs";\n` +
-      `export function syncAll() { writeFileSync(${JSON.stringify(marker)}, "ran"); return { enabled: true }; }\n` +
-      `export function syncStatus() { return { enabled: true, homes: ["a", "b"] }; }\n`,
-  );
+  process.env.HUB_CONFIG_DIR = dir;
+  process.env.PLUGIN_UPDATER_APP = "opencode";
   return dir;
 }
 
-describe("plugin-updater syncbridge wrapper", () => {
-  it("syncAllAcrossApps loads sync-bridge and calls syncAll", async () => {
+// A plugin deployed the way this repo deploys one: a bundle plus the manifest sidecar beside it
+// that says which capabilities it provides. The provider is named "bridge" rather than
+// "sync-bridge" on purpose, because nothing in the resolution may depend on the name.
+function deployProvider(configDir: string, capabilities: string[], body: string): void {
+  const dir = getPluginDir(configDir);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "bridge.json"), JSON.stringify({ id: "bridge", api: 1, entry: "bridge.js", capabilities }));
+  writeFileSync(join(dir, "bridge.js"), body);
+}
+
+function providerBody(marker: string): string {
+  return [
+    "export default {",
+    "  activate(context) {",
+    "    context.provide({ id: 'cross-app-sync' }, {",
+    "      sync: async () => {",
+    "        const { writeFileSync } = await import('fs');",
+    `        writeFileSync(${JSON.stringify(marker)}, 'ran');`,
+    "        return { files: ['config/settings.json'], plugins: [], homes: ['a', 'b'] };",
+    "      },",
+    "    });",
+    "  },",
+    "  deactivate() {},",
+    "};",
+  ].join("\n");
+}
+
+describe("cross-app sync from a launch sequence", () => {
+  it("resolves the provider by capability and runs its sync", async () => {
+    const configDir = home();
     const marker = join(mkdtempSync(join(tmpdir(), "pu-mark-")), "ran.txt");
-    const configDir = fakeBridge(marker);
+    deployProvider(configDir, ["cross-app-sync"], providerBody(marker));
+
     await syncAllAcrossApps(configDir);
+
     expect(existsSync(marker)).toBe(true);
   });
 
-  it("readSyncStatus returns the bridge status", async () => {
-    const configDir = fakeBridge(join(tmpdir(), "unused-marker"));
-    const status = (await readSyncStatus(configDir)) as { enabled: boolean; homes: string[] } | null;
-    expect(status?.enabled).toBe(true);
-    expect(status?.homes).toEqual(["a", "b"]);
+  // The ordinary first-run case, and the one an install depends on: a home with no provider must
+  // cost the sync, never the launch.
+  it("is a silent no-op when nothing in the home provides it", async () => {
+    const configDir = home();
+    await expect(syncAllAcrossApps(configDir)).resolves.toBeUndefined();
   });
 
-  it("syncAllAcrossApps is a no-op when sync-bridge is not installed", async () => {
-    const configDir = mkdtempSync(join(tmpdir(), "pu-empty-"));
+  it("ignores a deployed plugin that provides something else", async () => {
+    const configDir = home();
+    const marker = join(mkdtempSync(join(tmpdir(), "pu-mark-")), "never.txt");
+    deployProvider(configDir, ["screens"], providerBody(marker));
+
+    await syncAllAcrossApps(configDir);
+
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  // A provider that throws is still a launch that has to finish.
+  it("survives a provider whose sync throws", async () => {
+    const configDir = home();
+    deployProvider(configDir, ["cross-app-sync"], [
+      "export default {",
+      "  activate(context) {",
+      "    context.provide({ id: 'cross-app-sync' }, { sync: async () => { throw new Error('boom'); } });",
+      "  },",
+      "  deactivate() {},",
+      "};",
+    ].join("\n"));
+
     await expect(syncAllAcrossApps(configDir)).resolves.toBeUndefined();
-    expect(await readSyncStatus(configDir)).toBeNull();
   });
 });

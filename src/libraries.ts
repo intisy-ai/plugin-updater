@@ -1,8 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getReposDir } from "./env.js";
-import { declaredLibraryTree, sharedStoreDir } from "./shared-libs.js";
+import { declaredLibraries, dropLibrary, sharedStoreDir } from "./shared-libs.js";
+import type { StoreInstaller } from "./shared-libs.js";
 import { writeLog } from "./log.js";
+
+const SCOPE = "@intisy-ai";
 
 // One resolvable package on disk, whether it came from the shared store or a plugin's
 // own npm install. `usedBy` is only meaningful for shared libraries: it names the plugins
@@ -65,23 +68,49 @@ function byName(a: InstalledLibrary, b: InstalledLibrary): number {
   return a.specifier.localeCompare(b.specifier);
 }
 
-// Which plugins declare each shared library, taken from the clones' own submodules so it
-// stays true for a library added by nothing more than a submodule. A plugin can reach the
-// same library by two paths in its tree, so each is credited to it once.
-function declarersBySpecifier(reposDir: string): Map<string, string[]> {
+/**
+ * Every library a plugin resolves at run time, from the ones it declares outward.
+ *
+ * @remarks
+ * A clone declares only its direct dependencies, and npm installs their closure, so crediting a
+ * library to the plugins that NAME it would leave a transitively-required one credited to nobody -
+ * reported as orphaned and offered for removal, which is exactly how a home loses a package
+ * something still imports. The closure is read from the store's own installed metadata, so it
+ * describes what is actually there rather than what a range might resolve to.
+ */
+function resolvedClosure(configDir: string, roots: string[]): Set<string> {
+  const store = sharedStoreDir(configDir);
+  const seen = new Set<string>();
+  const pending = [...roots];
+  while (pending.length > 0) {
+    const specifier = pending.pop() as string;
+    if (seen.has(specifier)) continue;
+    seen.add(specifier);
+    for (const dependency of Object.keys(readPackage(path.join(store, ...specifier.split("/")))?.dependencies ?? {})) {
+      if (dependency.startsWith(`${SCOPE}/`) && !seen.has(dependency)) pending.push(dependency);
+    }
+  }
+  return seen;
+}
+
+// Which plugins each shared library serves, taken from the clones' own package.json
+// dependencies. A plugin reaching the same library twice is credited once.
+function declarersBySpecifier(configDir: string): Map<string, string[]> {
+  const reposDir = getReposDir(configDir);
   const declarers = new Map<string, Set<string>>();
   for (const plugin of directories(reposDir)) {
-    for (const library of declaredLibraryTree(path.join(reposDir, plugin))) {
-      const existing = declarers.get(library.specifier);
+    const roots = declaredLibraries(path.join(reposDir, plugin)).map((library: { specifier: string }) => library.specifier);
+    for (const specifier of resolvedClosure(configDir, roots)) {
+      const existing = declarers.get(specifier);
       if (existing) existing.add(plugin);
-      else declarers.set(library.specifier, new Set([plugin]));
+      else declarers.set(specifier, new Set([plugin]));
     }
   }
   return new Map([...declarers].map(([specifier, plugins]) => [specifier, [...plugins]]));
 }
 
 export function sharedLibraries(configDir: string): InstalledLibrary[] {
-  const declarers = declarersBySpecifier(getReposDir(configDir));
+  const declarers = declarersBySpecifier(configDir);
   return packageDirs(sharedStoreDir(configDir))
     .map((dir) => readLibrary(dir))
     .filter((library): library is InstalledLibrary => library !== null)
@@ -89,19 +118,22 @@ export function sharedLibraries(configDir: string): InstalledLibrary[] {
     .sort(byName);
 }
 
-// Removes a library from a home's shared store. Refuses while a plugin still declares it: the
+// Removes a library from a home's shared store. Refuses while a plugin still resolves it: the
 // store is what those plugins resolve their imports from, so taking it out from under them is
 // the "cannot find package" failure this ecosystem already knows well. The caller decides
 // whether to uninstall those plugins first.
-export function removeLibrary(configDir: string, specifier: string): { removed: boolean; usedBy: string[] } {
-  const usedBy = (declarersBySpecifier(getReposDir(configDir)).get(specifier) ?? []).sort();
+export function removeLibrary(
+  configDir: string,
+  specifier: string,
+  install?: StoreInstaller,
+): { removed: boolean; usedBy: string[] } {
+  const usedBy = (declarersBySpecifier(configDir).get(specifier) ?? []).sort();
   if (usedBy.length > 0) return { removed: false, usedBy };
 
-  const target = path.join(sharedStoreDir(configDir), ...specifier.split("/"));
-  if (!fs.existsSync(target)) return { removed: false, usedBy: [] };
-  fs.rmSync(target, { recursive: true, force: true });
-  writeLog(`Removed shared library ${specifier}`);
-  return { removed: true, usedBy: [] };
+  if (!fs.existsSync(path.join(sharedStoreDir(configDir), ...specifier.split("/")))) return { removed: false, usedBy: [] };
+  // Dropped through the home's manifest rather than by deleting the directory, so npm keeps
+  // whatever another entry still needs transitively.
+  return { removed: dropLibrary(specifier, configDir, writeLog, install), usedBy: [] };
 }
 
 // Every library in the store that no installed plugin declares. Uninstalling a plugin can leave
@@ -118,13 +150,7 @@ function installedVersion(dir: string): string {
 // A plugin's own dependencies, reported at the version actually installed next to it
 // rather than the range its package.json asks for. A declared dependency that never got
 // installed is still listed, with an empty version, because its absence is the
-// interesting part.
-//
-// Each is named by the specifier the plugin IMPORTS it by, never by the `name` in the
-// installed copy's package.json. A `file:` submodule install copies that package.json
-// verbatim, so an unscoped library reads as `core` next to the plugin and as
-// `@intisy-ai/core` in the shared store (which materializing rewrites) — one library
-// reported twice, under two names.
+// interesting part. Each is named by the specifier the plugin IMPORTS it by.
 export function pluginDependencies(configDir: string, plugin: string): InstalledLibrary[] {
   const cloneDir = path.join(getReposDir(configDir), plugin);
   const declared = readPackage(cloneDir)?.dependencies;

@@ -1,58 +1,10 @@
-// Init-time helpers split out of cli.ts so the comment-preserving opencode-config
-// edit and the app-resolution logic are unit-testable without running the CLI entry.
+// Init-time helpers split out of cli.ts so app registration and app resolution are
+// unit-testable without running the CLI entry.
 import fs from "fs";
 import path from "path";
-
-// ── opencode config target ───────────────────────────────────────────────────
-// `init` must NOT create a fresh opencode.json when the user already has an
-// opencode.jsonc — opencode reads either, and a second file is confusing. Prefer an
-// existing opencode.json, else an existing opencode.jsonc, else default to .json.
-export function resolveOpencodeConfigPath(
-  configDir: string,
-  exists: (p: string) => boolean = fs.existsSync,
-): string {
-  const jsonPath = path.join(configDir, "opencode.json");
-  const jsoncPath = path.join(configDir, "opencode.jsonc");
-  if (exists(jsonPath)) return jsonPath;
-  if (exists(jsoncPath)) return jsoncPath;
-  return jsonPath;
-}
-
-// Insert `pluginName` as the first entry of the root `plugin` array, editing the raw
-// text in place so // comments and formatting elsewhere survive (a JSON.stringify
-// rewrite would strip them). `hasPluginKey` (from the PARSED root, so it can't be
-// fooled by a nested "plugin" key or one inside a string) selects the branch: true →
-// insert into the existing array; false → add a new `plugin` key. Returns the edited
-// text, or null if it can't be safely edited (caller then falls back to a JSON write).
-export function insertPluginIntoJsonc(raw: string, pluginName: string, hasPluginKey: boolean): string | null {
-  const entry = JSON.stringify(pluginName);
-
-  if (hasPluginKey) {
-    // Insert right after the root array's `[`. Prefer a line-anchored match so a deeper
-    // `"plugin": [` earlier in the file can't be picked; fall back to the first match.
-    const m = raw.match(/^[ \t]*"plugin"\s*:\s*\[/m) ?? raw.match(/"plugin"\s*:\s*\[/);
-    if (!m || m.index === undefined) return null;
-    const at = m.index + m[0].length;
-    const rest = raw.slice(at);
-    const isEmpty = /^\s*\]/.test(rest);
-    return raw.slice(0, at) + (isEmpty ? entry : `${entry}, `) + rest;
-  }
-
-  // No `plugin` key — insert one right after the root `{`.
-  const brace = raw.indexOf("{");
-  if (brace === -1) return null;
-  const afterBrace = raw.slice(brace + 1);
-  const isEmptyObject = /^\s*}/.test(afterBrace);
-  if (isEmptyObject) {
-    return raw.slice(0, brace + 1) + `\n  "plugin": [${entry}]\n` + afterBrace;
-  }
-  return raw.slice(0, brace + 1) + `\n  "plugin": [${entry}],` + afterBrace;
-}
-
-// ── app registration ─────────────────────────────────────────────────────────
-// Registering the updater with an app is needed by the CLI's `init` and by a host
-// installing the updater in-process, so it lives here rather than in the CLI entry.
-// Nothing here prints: a host embedding this must not write to its stdout.
+// @ts-ignore - generated bundle, no .d.ts
+import { registerPluginWithApp } from "@intisy-ai/core";
+import { autoLoadDescriptor } from "./apps.js";
 
 const UPDATER = "plugin-updater";
 
@@ -61,67 +13,25 @@ export interface UpdaterRegistration {
   changed: boolean;
 }
 
-function readJsonFile(file: string): Record<string, unknown> | null {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8").replace(/^\s*\/\/[^\n]*/gm, ""));
-  } catch {
-    return null;
-  }
-}
-
 export function ensurePluginsJson(configDir: string): void {
   const file = path.join(configDir, "config", "plugins.json");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (!fs.existsSync(file)) fs.writeFileSync(file, "[]\n", "utf8");
 }
 
-function registerHook(configDir: string): UpdaterRegistration {
-  const target = path.join(configDir, "settings.json");
-  const settings = (fs.existsSync(target) ? readJsonFile(target) : {}) ?? {};
-  const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>;
-  const sessionStart = (hooks.SessionStart ?? []) as unknown[];
-  if (JSON.stringify(sessionStart).includes(UPDATER)) return { target, changed: false };
-  // @latest so npx re-resolves the tag instead of pinning its first cached copy
-  sessionStart.push({ hooks: [{ type: "command", command: `npx -y ${UPDATER}@latest run --app claude` }] });
-  hooks.SessionStart = sessionStart;
-  settings.hooks = hooks;
-  fs.writeFileSync(target, JSON.stringify(settings, null, 2), "utf8");
-  return { target, changed: true };
-}
-
-function registerPluginEntry(configDir: string): UpdaterRegistration {
-  const target = resolveOpencodeConfigPath(configDir);
-  const exists = fs.existsSync(target);
-  const raw = exists ? fs.readFileSync(target, "utf8") : "";
-  const parsed = exists ? readJsonFile(target) : null;
-  // opencode plugin entries may be a string OR a [name, options] tuple
-  const plugins = Array.isArray(parsed?.plugin) ? (parsed.plugin as unknown[]) : [];
-  const has = plugins.some((p) =>
-    p === UPDATER
-    || (typeof p === "string" && p.startsWith(`${UPDATER}@`))
-    || (Array.isArray(p) && p[0] === UPDATER));
-  if (has) return { target, changed: false };
-
-  // Comment-preserving in-place insert for an existing file; fall back to a fresh JSON
-  // write only when there's no file or the text can't be safely edited.
-  if (exists && raw.trim()) {
-    const edited = insertPluginIntoJsonc(raw, UPDATER, Array.isArray(parsed?.plugin));
-    if (edited) {
-      fs.writeFileSync(target, edited, "utf8");
-      return { target, changed: true };
-    }
-  }
-  const config = (parsed ?? {}) as Record<string, unknown>;
-  config.plugin = [UPDATER, ...plugins];
-  if (!config.$schema) config.$schema = "https://opencode.ai/config.json";
-  fs.writeFileSync(target, JSON.stringify(config, null, 2), "utf8");
-  return { target, changed: true };
-}
-
+/**
+ * Makes `app` load the updater on its own next start, and gives it a plugin registry to read.
+ *
+ * @remarks
+ * Needed by the CLI's `init` and by a host installing the updater in-process, so it lives here
+ * rather than in the CLI entry. Nothing prints: a host embedding this must not write to its
+ * stdout. An app declaring no way to auto-load a plugin registers nothing, which is not a failure.
+ */
 export function registerUpdaterWithApp(configDir: string, app: string): UpdaterRegistration {
   ensurePluginsJson(configDir);
-  return app === "claude" ? registerHook(configDir) : registerPluginEntry(configDir);
+  return registerPluginWithApp(configDir, autoLoadDescriptor(app), UPDATER) ?? { target: "", changed: false };
 }
+
 
 // ── app resolution ───────────────────────────────────────────────────────────
 export interface PresentApps {

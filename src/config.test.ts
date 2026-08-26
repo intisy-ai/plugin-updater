@@ -3,9 +3,9 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { registerPlugin, setPluginEnabled, setPluginAutoUpdate, getPlugins } from "./config.js";
-import { UPDATER_DEFAULTS, UPDATER_NAME } from "./schema.js";
+import { UPDATER_DEFAULTS, UPDATER_NAME, UPDATER_SETTINGS } from "./schema.js";
 // @ts-ignore: generated bundle, no .d.ts
-import { getCapabilities, loadConfig } from "@intisy-ai/core";
+import { loadConfig } from "@intisy-ai/core";
 
 let dir: string;
 
@@ -87,8 +87,7 @@ describe("channel defaults", () => {
   });
 
   it("the registered field list contains both channel settings and every non-dotted key corresponds to a default", () => {
-    const caps = getCapabilities(UPDATER_NAME);
-    const fieldKeys = (caps.fields || []).map((f: { key: string }) => f.key);
+    const fieldKeys = (UPDATER_SETTINGS.fields || []).map((f: { key: string }) => f.key);
 
     expect(fieldKeys).toContain("experimental");
     expect(fieldKeys).toContain("experimental_branch");

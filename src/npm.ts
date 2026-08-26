@@ -50,7 +50,9 @@ export function getNpmGlobalRoot(): string {
   return npmGlobalRoot;
 }
 
-export function resolveNpmPluginVersion(name: string, configDir: string): string {
+// Where a package's manifest sits in this home, or "" when nothing resolves it. The search order
+// is the app's own cache first, then this home, then the global root, then plain node resolution.
+export function resolveNpmPluginManifest(name: string, configDir: string): string {
   try {
     // opencode installs npm plugins into ~/.cache/opencode/packages/<name>@<spec>/
     const packageCache = path.join(os.homedir(), ".cache", "opencode", "packages");
@@ -58,9 +60,7 @@ export function resolveNpmPluginVersion(name: string, configDir: string): string
       for (const entry of fs.readdirSync(packageCache)) {
         if (entry !== name && !entry.startsWith(`${name}@`)) continue;
         const cachedPkg = path.join(packageCache, entry, "node_modules", name, "package.json");
-        if (fs.existsSync(cachedPkg)) {
-          return JSON.parse(fs.readFileSync(cachedPkg, "utf8")).version || "";
-        }
+        if (fs.existsSync(cachedPkg)) return cachedPkg;
       }
     }
     const cacheDir = path.join(getCacheDir(configDir), "node_modules");
@@ -70,17 +70,39 @@ export function resolveNpmPluginVersion(name: string, configDir: string): string
       path.join(configDir, "node_modules", name, "package.json"),
       globalNpm ? path.join(globalNpm, name, "package.json") : "",
     ].filter((p) => p !== "");
-    for (const p of candidates) {
-      if (fs.existsSync(p)) {
-        return JSON.parse(fs.readFileSync(p, "utf8")).version || "";
-      }
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
     }
     try {
-      const resolved = require.resolve(path.join(name, "package.json"));
-      return JSON.parse(fs.readFileSync(resolved, "utf8")).version || "";
+      return require.resolve(path.join(name, "package.json"));
     } catch { /* not resolvable */ }
   } catch { /* ignore */ }
   return "";
+}
+
+function readManifest(manifestPath: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export function resolveNpmPluginVersion(name: string, configDir: string): string {
+  const manifestPath = resolveNpmPluginManifest(name, configDir);
+  if (!manifestPath) return "";
+  const manifest = readManifest(manifestPath);
+  return typeof manifest?.version === "string" ? manifest.version : "";
+}
+
+// The file a surface can run to ask the plugin about itself, which for an npm plugin is the only
+// thing standing in for the bundle a cloned plugin deploys.
+export function resolveNpmPluginEntry(name: string, configDir: string): string {
+  const manifestPath = resolveNpmPluginManifest(name, configDir);
+  if (!manifestPath) return "";
+  const main = readManifest(manifestPath)?.main;
+  const entry = path.join(path.dirname(manifestPath), typeof main === "string" && main ? main : "index.js");
+  return fs.existsSync(entry) ? entry : "";
 }
 
 export function getNpmPlugins(configDir: string): NpmPlugin[] {
@@ -89,7 +111,7 @@ export function getNpmPlugins(configDir: string): NpmPlugin[] {
   return plugins.map((raw) => {
     const name = raw.replace(/@[^@/]+$/, "") || raw;
     const version = resolveNpmPluginVersion(name, configDir);
-    return { name, version, installed: version !== "", raw };
+    return { name, version, installed: version !== "", raw, entryPath: resolveNpmPluginEntry(name, configDir) || undefined };
   });
 }
 

@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 // @ts-ignore - built output of the nested checkout, resolved by relative path like the contract test
-import { assertManifest } from "../../core/api/dist/index.js";
+import { assertManifest } from "@intisy-ai/api/engine";
 
 // fileURLToPath, not new URL().pathname: on Windows the latter yields a leading-slash path that
 // doubles the drive letter when joined.
@@ -17,8 +17,8 @@ describe("plugin.json", () => {
     expect(() => assertManifest(manifest)).not.toThrow();
   });
 
-  it("declares the capability that makes this the plugin manager", () => {
-    expect(manifest.capabilities).toEqual(["plugin-management"]);
+  it("declares the capabilities that make this the plugin manager", () => {
+    expect(manifest.capabilities).toEqual(["plugin-management", "library-management", "settings"]);
   });
 
   it("points its entry at the bundle deploy actually copies", () => {
