@@ -11,20 +11,13 @@ import { readCloneManifest, syncManifestSidecar } from "./manifest.js";
 // @ts-ignore - generated bundle, no .d.ts
 import { deployBundle, deployEntryFile, repoHead } from "@intisy-ai/core";
 
-// A loader plugin self-describes as one via cairn.json's `app.loader.id` (see
+// A loader plugin self-describes as one via its manifest's `app.loader.id` (see
 // registerAppFromClone in index.ts), so this reads the clone's OWN manifest rather
 // than the shared app registry — the registry only gains this entry AFTER deploy
 // completes (registerAppFromClone runs post-deploy), so on a loader's first-ever
 // install the registry wouldn't have it yet.
 export function isLoaderPlugin(sourceDir: string, pluginName: string): boolean {
-  try {
-    const manifest = JSON.parse(fs.readFileSync(path.join(sourceDir, "cairn.json"), "utf8")) as {
-      app?: { loader?: { id?: string } };
-    };
-    return manifest.app?.loader?.id === pluginName;
-  } catch {
-    return false;
-  }
+  return readCloneManifest(sourceDir)?.app?.loader?.id === pluginName;
 }
 
 export { deployEntryFile };

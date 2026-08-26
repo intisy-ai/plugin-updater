@@ -131,7 +131,7 @@ export interface UpdateOutcome {
 export interface PullOptions {
   trigger?: Trigger;
   plugins?: Plugin[];
-  // the registry side-effect a fresh clone needs (a loader's cairn.json may have moved);
+  // the registry side-effect a fresh clone needs (a loader's app declaration may have moved);
   // injected so this module never reaches back into the entry point
   afterInstall?: (name: string) => void;
   // when set, only these names are considered, and policy is ignored because a human asked

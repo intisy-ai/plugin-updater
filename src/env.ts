@@ -42,7 +42,7 @@ export function getAppConfigDir(appName: string): string {
   const custom = customAppHome(appName);
   if (custom) return custom;
   // Bootstrap fallback: no registry entry exists yet for this app (nothing has
-  // registered it via cairn.json, see registerAppFromClone), so guess the two known
+  // registered it from its manifest, see registerAppFromClone), so guess the two known
   // built-in layouts directly. Once a loader for this app has installed at least once,
   // customAppHome() above resolves it from the registry instead.
   const home = os.homedir();

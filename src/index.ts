@@ -9,7 +9,7 @@ import { checkUpdates, runAutoUpdate, updateOne as updateOneInHome, updateAll as
 import { resolveMode, type Trigger } from "./policy.js";
 import { resolveBranch, tracksExperimental } from "./channel.js";
 import { readUpdateCache, writeUpdateCache } from "./cache.js";
-import { deployedIdFor, DEPLOYED_SUFFIXES } from "./manifest.js";
+import { deployedIdFor, readCloneManifest, DEPLOYED_SUFFIXES } from "./manifest.js";
 import { UPDATER_NAME, UPDATER_SETTINGS, updaterSchema, readUpdaterConfig } from "./schema.js";
 // @ts-ignore — generated bundle, no .d.ts
 // @ts-ignore — generated bundle, no .d.ts
@@ -162,7 +162,7 @@ export function pruneOrphans(configDir: string, plugins: Plugin[]): void {
 export { getNpmPlugins, installNpmPlugin, uninstallNpmPlugin, updateNpmPlugin } from "./npm.js";
 export { getPlugins, getPluginsPath } from "./config.js";
 
-// cairn.json is arbitrary on-disk data, so the fields registerApp depends on are
+// A manifest is arbitrary on-disk data, so the fields registerApp depends on are
 // checked here rather than asserted: a malformed block registers nothing instead of
 // entering the registry half-formed.
 function isAppDescriptor(value: unknown): value is AppDescriptor {
@@ -177,19 +177,13 @@ function isAppDescriptor(value: unknown): value is AppDescriptor {
   );
 }
 
-// A loader's clone carries its app descriptor in cairn.json (`app` block). Register
+// A loader's clone carries its app descriptor in its manifest (`app` block). Register
 // it into the shared app registry so a dashboard discovers apps from the loaders
 // installed here, with no hardcoded app list. Best-effort: a plugin without an
 // `app` block (any non-loader) registers nothing.
 export function registerAppFromClone(name: string, reposDir: string = getReposDir()): void {
-  try {
-    const manifestPath = path.join(reposDir, name, "cairn.json");
-    if (!fs.existsSync(manifestPath)) return;
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { app?: unknown };
-    if (isAppDescriptor(manifest.app)) registerApp(manifest.app);
-  } catch {
-    // no manifest or malformed on disk: register nothing
-  }
+  const app = readCloneManifest(path.join(reposDir, name))?.app;
+  if (isAppDescriptor(app)) registerApp(app);
 }
 
 // Called whenever a plugin finishes installing or updating: announce it (as
