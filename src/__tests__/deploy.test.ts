@@ -1,6 +1,6 @@
 // isLoaderPlugin decides whether deployToExecutionDir must call activate() after every
 // deploy (loaders refresh their oc/cc wrapper) vs only under claude (see deploy.ts).
-// It reads the clone's OWN cairn.json `app.loader.id`, not the shared app registry
+// It reads the clone's OWN manifest `app.loader.id`, not the shared app registry
 // (registerAppFromClone only populates the registry AFTER deploy completes), so this
 // locks in that manifest-reading behavior directly.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -21,12 +21,12 @@ describe("isLoaderPlugin", () => {
     rmSync(sourceDir, { recursive: true, force: true });
   });
 
-  function writeManifest(manifest: unknown): void {
-    writeFileSync(join(sourceDir, "cairn.json"), JSON.stringify(manifest));
+  function writeManifest(manifest: Record<string, unknown>): void {
+    writeFileSync(join(sourceDir, "plugin.json"), JSON.stringify({ id: "claude-code-loader", api: 1, ...manifest }));
   }
 
-  it("returns true for a loader whose cairn.json app.loader.id matches its own plugin name", () => {
-    // mirrors the real claude-code-loader cairn.json shape
+  it("returns true for a loader whose manifest app.loader.id matches its own plugin name", () => {
+    // mirrors the real claude-code-loader manifest shape
     writeManifest({
       displayName: "Claude Code Loader",
       icon: "icon.svg",
@@ -65,13 +65,13 @@ describe("isLoaderPlugin", () => {
     expect(isLoaderPlugin(sourceDir, "some-other-plugin")).toBe(false);
   });
 
-  it("returns false when the clone has no cairn.json on disk", () => {
+  it("returns false when the clone has no manifest on disk", () => {
     expect(isLoaderPlugin(sourceDir, "claude-code-loader")).toBe(false);
   });
 
-  it("returns false when cairn.json is malformed JSON", () => {
+  it("returns false when the manifest is malformed JSON", () => {
     mkdirSync(sourceDir, { recursive: true });
-    writeFileSync(join(sourceDir, "cairn.json"), "{ not valid json");
+    writeFileSync(join(sourceDir, "plugin.json"), "{ not valid json");
     expect(isLoaderPlugin(sourceDir, "claude-code-loader")).toBe(false);
   });
 });

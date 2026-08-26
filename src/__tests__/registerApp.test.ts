@@ -1,4 +1,4 @@
-// A loader's installed clone carries its app descriptor in cairn.json; on install
+// A loader's installed clone carries its app descriptor in its manifest; on install
 // plugin-updater registers that block into the shared app registry so a dashboard
 // discovers apps from the loaders on disk, without a hardcoded app list.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -21,10 +21,12 @@ describe("registerAppFromClone", () => {
     rmSync(repos, { recursive: true, force: true });
   });
 
-  function writeManifest(name: string, manifest: unknown): void {
+  // The manifest id deliberately differs from the directory name: a clone is found by its
+  // directory and read by its manifest, and a fixture reusing one string for both would pass either way.
+  function writeManifest(name: string, manifest: Record<string, unknown>): void {
     const dir = join(repos, name);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "cairn.json"), JSON.stringify(manifest));
+    writeFileSync(join(dir, "plugin.json"), JSON.stringify({ id: `${name}-id`, api: 1, ...manifest }));
   }
 
   it("registers a loader's app block into the shared registry", () => {

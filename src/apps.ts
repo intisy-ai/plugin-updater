@@ -4,7 +4,7 @@ import { getAppDescriptor, resolveHome } from "@intisy-ai/core";
 import type { AppDescriptor } from "@intisy-ai/core";
 
 // Looks an app up in the SHARED app registry (libs/core's apps.json, populated by a
-// loader's cairn.json `app` block on install — see index.ts's registerAppFromClone) and
+// loader's manifest `app` block on install — see index.ts's registerAppFromClone) and
 // resolves its home dir the same way core does. Returns null when the app isn't
 // registered yet, so callers fall back to their own bootstrap heuristic (there is no
 // registry entry to consult before any loader has ever been installed).
