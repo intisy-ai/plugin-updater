@@ -9,15 +9,6 @@
     "library-management",
     "settings"
   ],
-  "repo": {
-    "role": "Plugin lifecycle manager",
-    "category": "tool",
-    "domains": [
-      "claude",
-      "opencode"
-    ],
-    "tech": "typescript"
-  },
   "config": {
     "defaults": {
       "logging": true,
@@ -37,5 +28,19 @@
         "cairn": true
       }
     }
+  },
+  "publish": {
+    "generatedReadme": true
+  },
+  "repo": {
+    "role": "Plugin lifecycle manager",
+    "category": "plugin",
+    "domains": [
+      "claude",
+      "opencode"
+    ],
+    "tech": [
+      "typescript"
+    ]
   }
 }
