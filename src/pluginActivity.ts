@@ -1,5 +1,5 @@
 // @ts-ignore: generated bundle, no .d.ts
-import { emitEvent, TOPICS, setActivityContext, getActivityContext, resetActivityContext } from "@intisy-ai/core";
+import { emitEvent, TOPICS, setActivityContext, getActivityContext, resetActivityContext, type ActivitySpec } from "@intisy-ai/core";
 import { getAppConfigDir, getAppName } from "./env.js";
 
 // Announce a plugin's install/update/failure on the event bus so a dashboard can
@@ -11,7 +11,7 @@ export type ActivityTrigger = "launch" | "manual";
 // several apps). This module already knows the dir every path operates on, so it states
 // it per emit and restores the previous context, because a sticky home would send the
 // next caller's events to this one's home.
-function emit(spec: Record<string, unknown>, home?: string): void {
+function emit(spec: ActivitySpec, home?: string): void {
   const previous = getActivityContext();
   try {
     setActivityContext({ home: home || getAppConfigDir(getAppName()) });
