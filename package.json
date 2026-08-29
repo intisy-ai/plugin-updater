@@ -43,7 +43,7 @@
     "vitest": "^3.2.6"
   },
   "dependencies": {
-    "@intisy-ai/api": "^1.0.2",
-    "@intisy-ai/basekit": "^4.0.0"
+    "@intisy/bayonet": "^1.7.0",
+    "@intisy-ai/basekit": "^4.3.0"
   }
 }

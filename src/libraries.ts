@@ -5,7 +5,10 @@ import { declaredLibraries, dropLibrary, sharedStoreDir } from "./shared-libs.js
 import type { StoreInstaller } from "./shared-libs.js";
 import { writeLog } from "./log.js";
 
-const SCOPE = "@intisy-ai";
+// Every first-party npm scope. More than one because a library that depends on nothing in this
+// ecosystem may live in another org, and a closure that did not recognise its scope would stop
+// following the graph there, leaving the library out of the home store.
+const SCOPES = ["@intisy-ai", "@intisy"];
 
 // One resolvable package on disk, whether it came from the shared store or a plugin's
 // own npm install. `usedBy` is only meaningful for shared libraries: it names the plugins
@@ -87,7 +90,7 @@ function resolvedClosure(configDir: string, roots: string[]): Set<string> {
     if (seen.has(specifier)) continue;
     seen.add(specifier);
     for (const dependency of Object.keys(readPackage(path.join(store, ...specifier.split("/")))?.dependencies ?? {})) {
-      if (dependency.startsWith(`${SCOPE}/`) && !seen.has(dependency)) pending.push(dependency);
+      if (SCOPES.some((scope) => dependency.startsWith(`${scope}/`)) && !seen.has(dependency)) pending.push(dependency);
     }
   }
   return seen;

@@ -16,7 +16,7 @@ await build({
   // Materialised once per home by this package itself, rather than carried by every plugin that
   // uses it. api is external for the same reason and for a sharper one: its generated engine is
   // 782 KB, nine times this whole bundle, so a private copy would dominate the deployed artifact.
-  external: ["@intisy-ai/basekit", "@intisy-ai/basekit/*", "@intisy-ai/api", "@intisy-ai/api/engine", "@intisy-ai/api/host"],
+  external: ["@intisy-ai/basekit", "@intisy-ai/basekit/*", "@intisy/bayonet", "@intisy/bayonet/engine", "@intisy/bayonet/host"],
 });
 
 console.log("Bundled plugin-updater -> dist/plugin.js (deployed artifact)");

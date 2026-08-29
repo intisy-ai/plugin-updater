@@ -100,6 +100,10 @@ describe("deployEntryFile", () => {
 // Stands in for `npm install --prefix <home>`, copying out of this repo's own installed
 // packages instead of reaching the registry. The closure is taken from what npm already
 // resolved here, so the home ends up holding exactly what a real install would put there.
+// Stands in for npm, so it follows the same scopes the real closure does: a library that left the
+// ecosystem's org still has to reach the store.
+const FIRST_PARTY = ["@intisy-ai/", "@intisy/"];
+
 function localInstaller(configDir: string): void {
   const manifest = JSON.parse(readFileSync(join(configDir, "package.json"), "utf8")) as {
     dependencies?: Record<string, string>;
@@ -115,7 +119,7 @@ function localInstaller(configDir: string): void {
     cpSync(from, join(configDir, "node_modules", ...specifier.split("/")), { recursive: true });
     const pkg = JSON.parse(readFileSync(join(from, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
     for (const dependency of Object.keys(pkg.dependencies ?? {})) {
-      if (dependency.startsWith("@intisy-ai/") && !done.has(dependency)) pending.push(dependency);
+      if (FIRST_PARTY.some((scope) => dependency.startsWith(scope)) && !done.has(dependency)) pending.push(dependency);
     }
   }
 }
@@ -140,7 +144,7 @@ describe("the deployed artifact", () => {
 
       // api's entry points live in generated/ rather than dist/, and the artifact imports it by
       // name, so the store has to carry that directory or the execFileSync below cannot even load.
-      expect(existsSync(join(home, "node_modules", "@intisy-ai", "api", "generated", "engine.js"))).toBe(true);
+      expect(existsSync(join(home, "node_modules", "@intisy", "bayonet", "generated", "engine.js"))).toBe(true);
 
       // Importing the copy is the proof, because that is exactly what a host does with it: the
       // artifact resolves its libraries BY NAME, so it loads only if the store beside it carries

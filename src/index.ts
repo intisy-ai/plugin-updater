@@ -18,7 +18,7 @@ import type { AppDescriptor, LibraryManagementCapability, PluginManagementCapabi
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
-import type { Plugin as ApiPlugin, PluginContext } from "@intisy-ai/api";
+import type { Plugin as ApiPlugin, PluginContext } from "@intisy/bayonet";
 import { libraryManagement, pluginManagement } from "./manage.js";
 import {
   emitPluginInstalled,

@@ -86,11 +86,11 @@ describe("sharedLibraries", () => {
   it("follows the closure more than one level deep", () => {
     const home = makeHome();
     shareLibrary(home, "@intisy-ai/claude-code-proxy", "1.1.0", ["@intisy-ai/basekit"]);
-    shareLibrary(home, "@intisy-ai/basekit", "1.0.3", ["@intisy-ai/api"]);
-    shareLibrary(home, "@intisy-ai/api", "1.0.2");
+    shareLibrary(home, "@intisy-ai/basekit", "1.0.3", ["@intisy/bayonet"]);
+    shareLibrary(home, "@intisy/bayonet", "1.0.2");
     makeClone(home, "claude-code-loader", { libraries: ["@intisy-ai/claude-code-proxy"] });
 
-    const api = sharedLibraries(home).find((l) => l.specifier === "@intisy-ai/api");
+    const api = sharedLibraries(home).find((l) => l.specifier === "@intisy/bayonet");
     expect(api?.usedBy).toEqual(["claude-code-loader"]);
   });
 

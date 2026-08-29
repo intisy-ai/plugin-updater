@@ -1,4 +1,4 @@
-import { callCapability, DEFAULT_INVOKE_TIMEOUT_MS, readDeployedManifests, startPlugins } from "@intisy-ai/api/host";
+import { callCapability, DEFAULT_INVOKE_TIMEOUT_MS, readDeployedManifests, startPlugins } from "@intisy/bayonet/host";
 import { createPluginRuntime, CROSS_APP_SYNC } from "@intisy-ai/basekit";
 import type { CrossAppSyncCapability } from "@intisy-ai/basekit";
 import { writeLog } from "./log.js";
