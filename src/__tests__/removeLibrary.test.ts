@@ -76,26 +76,26 @@ describe("removeLibrary", () => {
   // Plugins resolve their imports out of this store, so pulling a library they declare is the
   // "cannot find package" failure by hand.
   it("refuses while a plugin still declares it, and names the plugins", () => {
-    const dir = installLibrary("@intisy-ai/core-auth");
-    writeHomeManifest({ "@intisy-ai/core-auth": "^1.0.0" });
-    installDeclarer("antigravity-auth", "@intisy-ai/core-auth");
+    const dir = installLibrary("@intisy-ai/anthropic-translator");
+    writeHomeManifest({ "@intisy-ai/anthropic-translator": "^1.0.0" });
+    installDeclarer("antigravity-auth", "@intisy-ai/anthropic-translator");
 
-    const result = removeLibrary(home, "@intisy-ai/core-auth", fakePrune);
+    const result = removeLibrary(home, "@intisy-ai/anthropic-translator", fakePrune);
 
     expect(result.removed).toBe(false);
     expect(result.usedBy).toEqual(["antigravity-auth"]);
     expect(existsSync(dir)).toBe(true);
   });
 
-  // The plugin names `core-auth`, which requires `core-ir`, so nothing declares core-ir directly.
+  // The plugin names `@intisy-ai/anthropic-translator`, which requires basekit, so nothing declares basekit directly.
   // Crediting only the direct ask would offer a library the plugin still imports for removal.
   it("refuses for a library a plugin reaches only through another one", () => {
-    installLibrary("@intisy-ai/core-auth", "1.0.0", { "@intisy-ai/core-ir": "^1.0.0" });
-    installLibrary("@intisy-ai/core-ir");
-    writeHomeManifest({ "@intisy-ai/core-auth": "^1.0.0", "@intisy-ai/core-ir": "^1.0.0" });
-    installDeclarer("antigravity-auth", "@intisy-ai/core-auth");
+    installLibrary("@intisy-ai/anthropic-translator", "1.0.0", { "@intisy-ai/basekit": "^1.0.0" });
+    installLibrary("@intisy-ai/basekit");
+    writeHomeManifest({ "@intisy-ai/anthropic-translator": "^1.0.0", "@intisy-ai/basekit": "^1.0.0" });
+    installDeclarer("antigravity-auth", "@intisy-ai/anthropic-translator");
 
-    const result = removeLibrary(home, "@intisy-ai/core-ir", fakePrune);
+    const result = removeLibrary(home, "@intisy-ai/basekit", fakePrune);
 
     expect(result.removed).toBe(false);
     expect(result.usedBy).toEqual(["antigravity-auth"]);
@@ -109,23 +109,23 @@ describe("removeLibrary", () => {
 describe("orphanedLibraries", () => {
   it("names the libraries no installed plugin declares", () => {
     installLibrary("@intisy-ai/left-behind");
-    installLibrary("@intisy-ai/core-auth");
-    installDeclarer("antigravity-auth", "@intisy-ai/core-auth");
+    installLibrary("@intisy-ai/anthropic-translator");
+    installDeclarer("antigravity-auth", "@intisy-ai/anthropic-translator");
 
     expect(orphanedLibraries(home)).toEqual(["@intisy-ai/left-behind"]);
   });
 
   it("names nothing when every library has a declarer", () => {
-    installLibrary("@intisy-ai/core-auth");
-    installDeclarer("antigravity-auth", "@intisy-ai/core-auth");
+    installLibrary("@intisy-ai/anthropic-translator");
+    installDeclarer("antigravity-auth", "@intisy-ai/anthropic-translator");
 
     expect(orphanedLibraries(home)).toEqual([]);
   });
 
   it("does not call a transitively-required library orphaned", () => {
-    installLibrary("@intisy-ai/core-auth", "1.0.0", { "@intisy-ai/core-ir": "^1.0.0" });
-    installLibrary("@intisy-ai/core-ir");
-    installDeclarer("antigravity-auth", "@intisy-ai/core-auth");
+    installLibrary("@intisy-ai/anthropic-translator", "1.0.0", { "@intisy-ai/basekit": "^1.0.0" });
+    installLibrary("@intisy-ai/basekit");
+    installDeclarer("antigravity-auth", "@intisy-ai/anthropic-translator");
 
     expect(orphanedLibraries(home)).toEqual([]);
   });

@@ -4,7 +4,7 @@ import os from "os";
 import path from "path";
 import { updaterSchema, UPDATER_NAME } from "../schema.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { loadConfig } from "@intisy-ai/core";
+import { loadConfig } from "@intisy-ai/basekit";
 
 let home: string;
 

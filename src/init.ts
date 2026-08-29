@@ -3,7 +3,7 @@
 import fs from "fs";
 import path from "path";
 // @ts-ignore - generated bundle, no .d.ts
-import { registerPluginWithApp } from "@intisy-ai/core";
+import { registerPluginWithApp } from "@intisy-ai/basekit";
 import { autoLoadDescriptor } from "./apps.js";
 
 const UPDATER = "plugin-updater";

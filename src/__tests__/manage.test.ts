@@ -299,15 +299,15 @@ describe("the library-management capability", () => {
   }
 
   it("lists the libraries of the home it was resolved against", async () => {
-    installLibrary("@intisy-ai/core", "1.2.3");
-    declare("demo", "@intisy-ai/core");
+    installLibrary("@intisy-ai/basekit", "1.2.3");
+    declare("demo", "@intisy-ai/basekit");
     const answer = await libraryManagement(home).libraries();
-    expect(answer.shared).toEqual([{ specifier: "@intisy-ai/core", version: "1.2.3", usedBy: ["demo"] }]);
+    expect(answer.shared).toEqual([{ specifier: "@intisy-ai/basekit", version: "1.2.3", usedBy: ["demo"] }]);
   });
 
   it("declines a removal while a plugin still declares it", async () => {
-    installLibrary("@intisy-ai/core", "1.2.3");
-    declare("demo", "@intisy-ai/core");
-    expect(await libraryManagement(home).remove("@intisy-ai/core")).toEqual({ removed: false, usedBy: ["demo"] });
+    installLibrary("@intisy-ai/basekit", "1.2.3");
+    declare("demo", "@intisy-ai/basekit");
+    expect(await libraryManagement(home).remove("@intisy-ai/basekit")).toEqual({ removed: false, usedBy: ["demo"] });
   });
 });

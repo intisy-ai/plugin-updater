@@ -13,8 +13,8 @@ import { deployedIdFor, readCloneManifest, DEPLOYED_SUFFIXES } from "./manifest.
 import { UPDATER_NAME, UPDATER_SETTINGS, updaterSchema, readUpdaterConfig } from "./schema.js";
 // @ts-ignore — generated bundle, no .d.ts
 // @ts-ignore — generated bundle, no .d.ts
-import { loadConfig, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "@intisy-ai/core";
-import type { AppDescriptor, LibraryManagementCapability, PluginManagementCapability, SettingsCapability } from "@intisy-ai/core";
+import { loadConfig, defineReadme, maybeRunReadmeCli, registerApp, withCause, setActivityContext, getActivityContext, resetActivityContext } from "@intisy-ai/basekit";
+import type { AppDescriptor, LibraryManagementCapability, PluginManagementCapability, SettingsCapability } from "@intisy-ai/basekit";
 import path from "path";
 import fs from "fs";
 import type { Plugin } from "./types.js";
@@ -272,7 +272,7 @@ export function pluginChannelState(configDir: string, name: string): PluginChann
   };
 }
 
-// core-loader's downgrade TUI action calls this SYNCHRONOUSLY and expects a string
+// basekit/loader's downgrade TUI action calls this SYNCHRONOUSLY and expects a string
 // ("" or "Success" = ok, anything else = an error message shown to the user), so it
 // cannot be async. Checks out the pinned commit and persists it (setPluginCommitHash)
 // so the pin survives the next earlyLaunch; deploy happens on the next restart.

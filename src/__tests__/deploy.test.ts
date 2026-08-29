@@ -244,28 +244,28 @@ describe("unresolvableLibraries", () => {
   }
 
   it("names a library the shipped handler imports that the store does not carry", () => {
-    const pkgPath = writeClone("@intisy-ai/core-auth");
-    writeShippedFiles(`import { listAccounts } from "@intisy-ai/core-auth";`);
-    expect(unresolvableLibraries(sourceDir, home, pkgPath)).toEqual(["@intisy-ai/core-auth"]);
+    const pkgPath = writeClone("@intisy-ai/basekit/auth");
+    writeShippedFiles(`import { listAccounts } from "@intisy-ai/basekit/auth";`);
+    expect(unresolvableLibraries(sourceDir, home, pkgPath)).toEqual(["@intisy-ai/basekit/auth"]);
   });
 
   it("names it for a deep import of the same library", () => {
-    const pkgPath = writeClone("@intisy-ai/core-auth");
-    writeShippedFiles(`import { listAccounts } from "@intisy-ai/core-auth/dist/accounts.js";`);
-    expect(unresolvableLibraries(sourceDir, home, pkgPath)).toEqual(["@intisy-ai/core-auth"]);
+    const pkgPath = writeClone("@intisy-ai/basekit/auth");
+    writeShippedFiles(`import { listAccounts } from "@intisy-ai/basekit/auth/dist/accounts.js";`);
+    expect(unresolvableLibraries(sourceDir, home, pkgPath)).toEqual(["@intisy-ai/basekit/auth"]);
   });
 
   it("reports nothing once the store carries it", () => {
-    const pkgPath = writeClone("@intisy-ai/core-auth");
-    writeShippedFiles(`import { listAccounts } from "@intisy-ai/core-auth";`);
-    putInStore("@intisy-ai/core-auth");
+    const pkgPath = writeClone("@intisy-ai/basekit/auth");
+    writeShippedFiles(`import { listAccounts } from "@intisy-ai/basekit/auth";`);
+    putInStore("@intisy-ai/basekit/auth");
     expect(unresolvableLibraries(sourceDir, home, pkgPath)).toEqual([]);
   });
 
   // A plugin that inlines its libraries at build time carries no reference to them, so naming
   // those would send every such plugin to a repair it does not need.
   it("holds no opinion about a declared library the plugin never imports", () => {
-    const pkgPath = writeClone("@intisy-ai/core-auth");
+    const pkgPath = writeClone("@intisy-ai/basekit/auth");
     writeShippedFiles(`function listAccounts() { return []; }`);
     expect(unresolvableLibraries(sourceDir, home, pkgPath)).toEqual([]);
   });

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import type { ActionSpec, CapabilitySchema, FieldSpec } from "@intisy-ai/core";
+import type { ActionSpec, CapabilitySchema, FieldSpec } from "@intisy-ai/basekit";
 
 export const UPDATER_NAME = "plugin-updater";
 

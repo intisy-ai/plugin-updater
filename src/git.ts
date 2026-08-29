@@ -55,7 +55,7 @@ export async function detectExperimentalBranches(
   return out;
 }
 // @ts-ignore — generated bundle, no .d.ts
-import { loadConfig, fetchRepo, buildRepo, repoHead, runGit } from "@intisy-ai/core";
+import { loadConfig, fetchRepo, buildRepo, repoHead, runGit } from "@intisy-ai/basekit";
 
 function getGitTimeoutMs(): number {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

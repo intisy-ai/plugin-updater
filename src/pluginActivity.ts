@@ -1,5 +1,5 @@
 // @ts-ignore: generated bundle, no .d.ts
-import { emitEvent, TOPICS, setActivityContext, getActivityContext, resetActivityContext, type ActivitySpec } from "@intisy-ai/core";
+import { emitEvent, TOPICS, setActivityContext, getActivityContext, resetActivityContext, type ActivitySpec } from "@intisy-ai/basekit";
 import { getAppConfigDir, getAppName } from "./env.js";
 
 // Announce a plugin's install/update/failure on the event bus so a dashboard can

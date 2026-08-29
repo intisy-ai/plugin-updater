@@ -3,7 +3,7 @@ import path from "node:path";
 import type {
   ActionResult, HomeLibraries, LibraryManagementCapability, LibraryRemoval, ManagedNpmPlugin, ManagedPlugin,
   PluginChannel, PluginChannelState, PluginDataEntry, PluginManagementCapability, PluginUpdateCache, UpdateTrigger,
-} from "@intisy-ai/core";
+} from "@intisy-ai/basekit";
 import { getEarlyLaunchConfigDir, setEarlyLaunchConfigDir } from "./env.js";
 import { getPlugins, getPluginsPath, setPluginAutoUpdate, setPluginChannel, setPluginEnabled } from "./config.js";
 import { getLocalHead } from "./git.js";

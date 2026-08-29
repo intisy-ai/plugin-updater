@@ -5,7 +5,7 @@ import { writeLog } from "./log.js";
 import type { Plugin } from "./types.js";
 import type { PluginChannel } from "./channel.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { getApps } from "@intisy-ai/core";
+import { getApps } from "@intisy-ai/basekit";
 
 // Which registered app a config dir belongs to, matched by the app id appearing as a
 // path segment (e.g. ".claude" -> "claude", ".config/opencode" -> "opencode"). Returns

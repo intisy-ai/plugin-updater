@@ -11,7 +11,7 @@ import { resolveInitApps, cwdApp, registerUpdaterWithApp, type PresentApps } fro
 import { getAppConfigDir, getReposDir, getPluginDir } from "./env.js";
 import { registerPluginEntry, removePluginEntry } from "./manage.js";
 // @ts-ignore — generated bundle, no .d.ts
-import { getApps } from "@intisy-ai/core";
+import { getApps } from "@intisy-ai/basekit";
 
 const UPDATER_NAME = "plugin-updater";
 

@@ -159,7 +159,7 @@ describe("runAutoUpdate", () => {
     const { runAutoUpdate } = await import("../updates.js");
     await runAutoUpdate(configDir, { trigger: "loader" });
 
-    const { drain } = await import("@intisy-ai/core");
+    const { drain } = await import("@intisy-ai/basekit");
     const events: { topic: string; payload: { details?: { name?: string; phase?: string }; impact?: string } }[] = [];
     drain("auto-progress", (e: typeof events[number]) => events.push(e));
     const progress = events.filter((e) => e.topic === "plugin.progress");
@@ -174,7 +174,7 @@ describe("runAutoUpdate", () => {
   it("honours a mode written after something already read this home's config", async () => {
     const { firstHash } = seedBehindClone("late-config");
     // poison the cache exactly as a module-load defineConfig does, before any config exists
-    const core = await import("@intisy-ai/core");
+    const core = await import("@intisy-ai/basekit");
     core.loadConfig("plugin-updater", configDir);
 
     writeConfig({ auto_update_mode: "check" });

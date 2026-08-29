@@ -5,7 +5,7 @@ import path from "path";
 import { registerPlugin, setPluginEnabled, setPluginAutoUpdate, getPlugins } from "./config.js";
 import { UPDATER_DEFAULTS, UPDATER_NAME, UPDATER_SETTINGS } from "./schema.js";
 // @ts-ignore: generated bundle, no .d.ts
-import { loadConfig } from "@intisy-ai/core";
+import { loadConfig } from "@intisy-ai/basekit";
 
 let dir: string;
 

@@ -7,7 +7,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { execSync } from "child_process";
 // @ts-ignore: generated bundle, no .d.ts
-import { readActivity } from "@intisy-ai/core";
+import { readActivity } from "@intisy-ai/basekit";
 import { getPlugins, getPluginsPath } from "../config.js";
 import { setEarlyLaunchConfigDir } from "../env.js";
 

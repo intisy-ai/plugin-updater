@@ -1,7 +1,7 @@
 // Universal plugin contract via core's shared test-kit. This plugin contributes no slash-command:
 // it declares its settings in plugin.json, and whichever loader serves an app is what offers a way
 // to change them.
-import { runPluginContract } from "@intisy-ai/core/testing";
+import { runPluginContract } from "@intisy-ai/basekit/testing";
 
 runPluginContract({
   name: "plugin-updater",

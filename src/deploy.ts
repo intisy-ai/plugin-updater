@@ -9,7 +9,7 @@ import { startDeclaredDaemon } from "./daemon.js";
 import { declaredLibraries, materializeLibraries, pruneAbandonedPluginStore, sharedStoreDir } from "./shared-libs.js";
 import { readCloneManifest, syncManifestSidecar } from "./manifest.js";
 // @ts-ignore - generated bundle, no .d.ts
-import { deployBundle, deployEntryFile, repoHead } from "@intisy-ai/core";
+import { deployBundle, deployEntryFile, repoHead } from "@intisy-ai/basekit";
 
 // A loader plugin self-describes as one via its manifest's `app.loader.id` (see
 // registerAppFromClone in index.ts), so this reads the clone's OWN manifest rather

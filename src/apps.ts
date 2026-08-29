@@ -1,7 +1,7 @@
 import os from "os";
 // @ts-ignore — generated bundle, no .d.ts
-import { getAppDescriptor, resolveHome } from "@intisy-ai/core";
-import type { AppDescriptor } from "@intisy-ai/core";
+import { getAppDescriptor, resolveHome } from "@intisy-ai/basekit";
+import type { AppDescriptor } from "@intisy-ai/basekit";
 
 // Looks an app up in the SHARED app registry (libs/core's apps.json, populated by a
 // loader's manifest `app` block on install — see index.ts's registerAppFromClone) and

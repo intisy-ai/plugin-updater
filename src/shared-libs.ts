@@ -8,5 +8,5 @@ export {
   mergeRange,
   pruneAbandonedPluginStore,
   sharedStoreDir,
-} from "@intisy-ai/core";
-export type { SharedLibrary, MaterializeResult, MergedRange, StoreInstaller } from "@intisy-ai/core";
+} from "@intisy-ai/basekit";
+export type { SharedLibrary, MaterializeResult, MergedRange, StoreInstaller } from "@intisy-ai/basekit";

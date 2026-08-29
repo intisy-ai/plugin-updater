@@ -1,4 +1,4 @@
-// core-loader's downgrade TUI action calls `updater.downgrade(repo, commitHash)`
+// basekit/loader's downgrade TUI action calls `updater.downgrade(repo, commitHash)`
 // synchronously and expects a string return ("" = ok). It must persist the pin
 // (plugins.json commitHash) so the NEXT earlyLaunch honors it instead of reverting to a
 // normal branch pull; and a plain updatePluginPublic() call with no commitHash must
