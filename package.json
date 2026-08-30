@@ -44,6 +44,6 @@
   },
   "dependencies": {
     "@intisy/bayonet": "^1.8.0",
-    "@intisy-ai/basekit": "^4.3.0"
+    "@intisy-ai/basekit": "^5.0.0"
   }
 }
